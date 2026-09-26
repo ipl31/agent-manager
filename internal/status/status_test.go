@@ -320,6 +320,31 @@ func TestDefaultRulesRealPanes(t *testing.T) {
 			"  ┃  Reply with just the word hi.\n  ┃\n     ▣  Build · Gemini 3.6 Flash\n  ┃\n  ┃\n  ┃\n  ┃  Build · Gemini 3.6 Flash Google\n  ╹▀▀▀▀\n   ■■■⬝⬝⬝⬝⬝  esc interrupt                    tab agents  ctrl+p commands", Working},
 		{"opencode retrying the provider (real capture, 1.18.31)", "opencode",
 			"  ┃  Run the shell command ls -la and tell me what files exist.\n  ┃\n     ▣  Build · Gemini 3.6 Flash\n  ┃\n  ┃\n  ┃\n  ┃  Build · Gemini 3.6 Flash Google\n  ╹▀▀▀▀\n   ⬝⬝⬝⬝⬝■■■ This model is currently experiencing high demand. Spikes in demand are usually t… [retrying in 5s attempt #3", Working},
+		// 2026-09-26 real capture: OpenCode 1.18.32 hides the composer while
+		// a permission overlay is up; the left-only ┃ border and △ icon are
+		// the stable markers. The unfinished turn row keeps the working
+		// spinner, so without a waiting rule the row stays working.
+		{"opencode permission dialog (real capture, 1.18.32)", "opencode",
+			"     ▣  Build · Big Pickle\n" +
+				"  ┃  △ Permission required\n" +
+				"  ┃    # Shell command\n" +
+				"  ┃  $ ls -la .\n" +
+				"  ┃   Allow once   Allow always   Reject          ctrl+f fullscreen  ⇆ select  enter confirm", Waiting},
+		// 2026-09-26 real capture: a question overlay lists numbered options,
+		// a "Type your own answer" row, and a footer with ↑↓ select / enter
+		// submit / esc dismiss behind the ┃ border.
+		{"opencode question dialog (real capture, 1.18.32)", "opencode",
+			"     → Asked 1 question\n" +
+				"\n" +
+				"  ┃\n" +
+				"  ┃  What should the new line be?\n" +
+				"  ┃\n" +
+				"  ┃  1. Race-enabled test command\n" +
+				"  ┃     Add a `go test -race ./...` line\n" +
+				"  ┃  5. Type your own answer\n" +
+				"  ┃\n" +
+				"  ┃  ↑↓ select  enter submit  esc dismiss\n" +
+				"  ┃", Waiting},
 		{"opencode turn interrupted with esc (real capture, 1.18.31)", "opencode",
 			"     detaches and reattaches to sessions, meaning\n     ▣  Build · MiMo V2.5 Free · interrupted\n  ┃\n  ┃\n  ┃\n  ┃  Build · MiMo V2.5 Free OpenCode Zen\n  ╹▀▀▀▀\n   /home/dev                    28.0K (14%)  ctrl+p commands", Idle},
 		{"opencode out of credits", "opencode",
@@ -333,6 +358,63 @@ func TestDefaultRulesRealPanes(t *testing.T) {
 				t.Fatalf("Match(%s) = %q want %q", tc.name, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestOpenCodeDialogRulesDoNotReadOldTranscript(t *testing.T) {
+	engine := defaultEngine(t)
+	// An old "Permission required" line in the transcript, above a finished
+	// turn and a visible composer, must not resolve to waiting.
+	pane := "  ┃  △ Permission required was shown earlier\n" +
+		"     ▣  Build · GLM-5.2 · 4.2s\n" +
+		"  ┃\n" +
+		"  ╹▀▀▀▀\n" +
+		"  /home/dev  ctrl+p commands"
+	if got, matched := engine.Match("opencode", pane); got != Finished || !matched {
+		t.Fatalf("Match() = (%q, %t) want (%q, true)", got, matched, Finished)
+	}
+	if got, matched := engine.RuleMatch("opencode", pane); matched {
+		t.Fatalf("RuleMatch() = (%q, %t) want no dialog rule", got, matched)
+	}
+	if hold := engine.TypingHold("opencode", pane); hold != "" {
+		t.Fatalf("TypingHold() = %q want no hold", hold)
+	}
+}
+
+func TestOpenCodeDialogsClassifyAsWaiting(t *testing.T) {
+	engine := defaultEngine(t)
+	cases := []string{
+		// 2026-09-26 real capture, OpenCode 1.18.32: permission overlay.
+		"     ▣  Build · Big Pickle\n" +
+			"  ┃  △ Permission required\n" +
+			"  ┃    # Shell command\n" +
+			"  ┃  $ ls -la .\n" +
+			"  ┃   Allow once   Allow always   Reject          ctrl+f fullscreen  ⇆ select  enter confirm",
+		// 2026-09-26 real capture, OpenCode 1.18.32: question overlay.
+		"     → Asked 1 question\n" +
+			"\n" +
+			"  ┃\n" +
+			"  ┃  What should the new line be?\n" +
+			"  ┃\n" +
+			"  ┃  1. Race-enabled test command\n" +
+			"  ┃     Add a `go test -race ./...` line\n" +
+			"  ┃  5. Type your own answer\n" +
+			"  ┃\n" +
+			"  ┃  ↑↓ select  enter submit  esc dismiss\n" +
+			"  ┃",
+	}
+	for _, pane := range cases {
+		if got, matched := engine.Match("opencode", pane); got != Waiting || !matched {
+			t.Fatalf("Match() = (%q, %t) want (%q, true)", got, matched, Waiting)
+		}
+		if got, matched := engine.RuleMatch("opencode", pane); got != Waiting || !matched {
+			t.Fatalf("RuleMatch() = (%q, %t) want (%q, true)", got, matched, Waiting)
+		}
+		// OpenCode hides the composer while these overlays are up, so the
+		// activity region is not ready and TypingHold reports Working.
+		if hold := engine.TypingHold("opencode", pane); hold != Working {
+			t.Fatalf("TypingHold() = %q want %q", hold, Working)
+		}
 	}
 }
 

@@ -448,6 +448,11 @@ busy_footer = "(?m)^\\s*[■⬝]+ "
 rules = [
   { state = "errored", pattern = "(?i)requires more credits" },
   { state = "errored", pattern = "(?im)^\\s*error\\b" },
+  # permission and question overlays replace the composer and wait for a
+  # choice. OpenCode hides the composer while they are up, so the scope
+  # is the whole pane; anchor the markers to the left border row.
+  { state = "waiting", pattern = "(?m)^\\s*┃\\s+△ Permission required\\b" },
+  { state = "waiting", pattern = "(?m)^\\s*┃\\s.*(?:⇆|↑↓) select\\s+enter (?:confirm|submit)\\b" },
   # spinner row while running: "▣  Build · GLM-5.2" (a finished turn
   # gains a duration: "▣  Build · GLM-5.2 · 22.0s")
   { state = "working", pattern = "(?m)^\\s*▣ +[^·\\n]+· [^·\\n]+$" },
