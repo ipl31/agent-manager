@@ -5,8 +5,10 @@ import (
 	"slices"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/mattn/go-runewidth"
 
 	"github.com/YoanWai/agent-manager/internal/config"
 )
@@ -55,6 +57,12 @@ type toolRules struct {
 	composerPlaceholder string
 	blinkingMarker      string
 	rules               []rule
+	// sidePanel tells the engine to detect and strip a right-hand panel
+	// drawn by the tool on wide panes.
+	sidePanel bool
+	// echoOpensTurn tells LastUserEcho to return the first prompt echo
+	// after the previous turn boundary, not the newest echo in the region.
+	echoOpensTurn bool
 }
 
 func NewEngine(cfg config.Config) (*Engine, error) {
@@ -72,7 +80,7 @@ func NewEngine(cfg config.Config) (*Engine, error) {
 		if def == "" {
 			def = Idle
 		}
-		tr := toolRules{defaultStatus: def, composerPlaceholder: tool.ComposerPlaceholder, blinkingMarker: tool.BlinkingMarker, rules: compiled}
+		tr := toolRules{defaultStatus: def, composerPlaceholder: tool.ComposerPlaceholder, blinkingMarker: tool.BlinkingMarker, rules: compiled, sidePanel: tool.SidePanel, echoOpensTurn: tool.EchoOpensTurn}
 		optional := []struct {
 			pattern string
 			target  **regexp.Regexp
@@ -108,6 +116,120 @@ func NewEngine(cfg config.Config) (*Engine, error) {
 	return engine, nil
 }
 
+// normalize removes tool-specific chrome that the pane text carries but
+// the rules should not see. For tools with a right-hand side panel, it
+// detects the panel column from the frame and strips it.
+func (tr toolRules) normalize(pane string) string {
+	if !tr.sidePanel || tr.activityCutoff == nil || tr.inputPrefix == nil {
+		return pane
+	}
+	region, ok := tr.activityRegion(pane)
+	if !ok {
+		return pane
+	}
+	lines := strings.Split(region, "\n")
+	col := tr.detectSidebarColumn(lines)
+	if col < 0 {
+		return pane
+	}
+	var b strings.Builder
+	for i, line := range lines {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(tr.stripSidebar(line, col))
+	}
+	return b.String() + pane[len(region):]
+}
+
+// detectSidebarColumn finds the column where the tool's right-hand side
+// panel starts. It looks for rows whose first non-space cell, after any
+// input_prefix gutter, sits in the right half of the pane and share the
+// same starting column. Returns -1 when no panel is detected.
+func (tr toolRules) detectSidebarColumn(lines []string) int {
+	maxWidth := 0
+	for _, line := range lines {
+		if w := displayWidth(line); w > maxWidth {
+			maxWidth = w
+		}
+	}
+	if maxWidth == 0 {
+		return -1
+	}
+	half := maxWidth / 2
+	counts := map[int]int{}
+	for _, line := range lines {
+		trimmed := strings.TrimRight(line, " \t")
+		if trimmed == "" {
+			continue
+		}
+		body := line
+		if loc := tr.inputPrefix.FindStringIndex(line); loc != nil && loc[0] == 0 {
+			body = line[loc[1]:]
+		}
+		spaces := 0
+		for _, r := range body {
+			if r != ' ' {
+				break
+			}
+			spaces++
+		}
+		if spaces == len(body) {
+			continue
+		}
+		prefix := line[:len(line)-len(body)]
+		col := displayWidth(prefix) + spaces
+		if col <= half {
+			continue
+		}
+		counts[col]++
+	}
+	for col, n := range counts {
+		if n >= 3 {
+			return col
+		}
+	}
+	return -1
+}
+
+// stripSidebar returns line with the right-hand panel removed, as long as
+// the cell immediately before the panel column is blank.
+func (tr toolRules) stripSidebar(line string, col int) string {
+	var w int
+	pos := 0
+	lastRune := rune(0)
+	for pos < len(line) {
+		r, size := utf8.DecodeRuneInString(line[pos:])
+		rw := runewidth.RuneWidth(r)
+		if w+rw > col {
+			break
+		}
+		w += rw
+		lastRune = r
+		pos += size
+	}
+	if lastRune != ' ' {
+		return line
+	}
+	end := pos
+	for end > 0 {
+		r, size := utf8.DecodeLastRuneInString(line[:end])
+		if r != ' ' {
+			break
+		}
+		end -= size
+	}
+	return line[:end]
+}
+
+func displayWidth(s string) int {
+	w := 0
+	for _, r := range s {
+		w += runewidth.RuneWidth(r)
+	}
+	return w
+}
+
 // Match derives a status and reports whether any signal matched, so the
 // caller can distinguish a real signal from the default fallback. A usage
 // or rate-limit banner is errored even when a turn-end summary or a limit
@@ -122,6 +244,7 @@ func (e *Engine) Match(tool, pane string) (string, bool) {
 	if !ok {
 		return Idle, false
 	}
+	pane = tr.normalize(pane)
 	if tr.isLimit(pane) {
 		return Errored, true
 	}
@@ -167,6 +290,7 @@ func (e *Engine) RuleMatch(tool, pane string) (string, bool) {
 	if !ok {
 		return "", false
 	}
+	pane = tr.normalize(pane)
 	return tr.matchRules(tr.matchScope(pane))
 }
 
@@ -376,6 +500,7 @@ func (e *Engine) ActivityRegion(tool, pane string) (string, bool) {
 	if !ok {
 		return "", false
 	}
+	pane = tr.normalize(pane)
 	return tr.activityRegion(pane)
 }
 
@@ -397,6 +522,7 @@ func (e *Engine) LastMessage(tool, pane string) (line string, anchored, ok bool)
 	if !ok {
 		return "", false, false
 	}
+	pane = tr.normalize(pane)
 	region, ok := tr.activityRegion(pane)
 	if !ok {
 		return "", false, false
@@ -546,6 +672,7 @@ func (e *Engine) FullTurnText(tool, pane string) (text string, bounded, ok bool)
 	if !ok {
 		return "", false, false
 	}
+	pane = tr.normalize(pane)
 	region, ok := tr.activityRegion(pane)
 	if !ok {
 		return "", false, false
@@ -765,6 +892,7 @@ func (e *Engine) LastUserEcho(tool, pane string) (string, bool) {
 	if !ok || tr.userEcho == nil {
 		return "", false
 	}
+	pane = tr.normalize(pane)
 	region, ok := tr.activityRegion(pane)
 	if !ok {
 		return "", false
@@ -774,9 +902,7 @@ func (e *Engine) LastUserEcho(tool, pane string) (string, bool) {
 	if i < 0 {
 		return "", true
 	}
-	line := strings.TrimRight(lines[i], " \t")
-	loc := tr.userEcho.FindStringIndex(line)
-	return strings.TrimSpace(line[loc[1]:]), true
+	return tr.echoedText(lines, i), true
 }
 
 // lastEchoIndex is the row carrying the newest prompt the tool echoed, or
@@ -799,28 +925,72 @@ func (tr toolRules) lastEchoIndex(lines []string) int {
 			break
 		}
 	}
+	// For tools where a turn's prompt is the first echo after the previous
+	// turn boundary, scan forward from that boundary so tool output that
+	// shares the echo marker is not mistaken for the prompt.
+	if tr.echoOpensTurn {
+		bound := -1
+		if tr.turnEnd != nil {
+			bound = tr.previousTurnEndIndex(lines[:end])
+		}
+		for i := bound + 1; i < end; i++ {
+			if tr.isEchoRow(lines[i]) {
+				return i
+			}
+		}
+		return -1
+	}
 	for i := end - 1; i >= 0; i-- {
+		if tr.isEchoRow(lines[i]) {
+			return i
+		}
+	}
+	return -1
+}
+
+// isEchoRow reports whether line is a valid user echo for this tool.
+func (tr toolRules) isEchoRow(line string) bool {
+	line = strings.TrimRight(line, " \t")
+	loc := tr.userEcho.FindStringIndex(line)
+	if loc == nil {
+		return false
+	}
+	// A dialog draws its option rows behind the same marker the
+	// composer uses (codex's "› 1. Yes, continue"), so a line any
+	// status rule recognises is the tool's frame, not an echo.
+	if tr.matchesAnyRule(line) {
+		return false
+	}
+	echoed := strings.TrimSpace(line[loc[1]:])
+	if echoed == "" {
+		return false
+	}
+	if tr.placeholder != nil && tr.placeholder.MatchString(echoed) {
+		return false
+	}
+	return true
+}
+
+// echoedText returns the full echoed prompt starting at start, joining
+// contiguous wrapped echo rows.
+func (tr toolRules) echoedText(lines []string, start int) string {
+	var parts []string
+	for i := start; i < len(lines); i++ {
 		line := strings.TrimRight(lines[i], " \t")
 		loc := tr.userEcho.FindStringIndex(line)
 		if loc == nil {
-			continue
+			break
 		}
-		// A dialog draws its option rows behind the same marker the
-		// composer uses (codex's "› 1. Yes, continue"), so a line any
-		// status rule recognises is the tool's frame, not an echo.
 		if tr.matchesAnyRule(line) {
-			continue
+			break
 		}
 		echoed := strings.TrimSpace(line[loc[1]:])
-		if echoed == "" {
-			continue
+		if echoed == "" || (tr.placeholder != nil && tr.placeholder.MatchString(echoed)) {
+			break
 		}
-		if tr.placeholder != nil && tr.placeholder.MatchString(echoed) {
-			continue
-		}
-		return i
+		parts = append(parts, echoed)
 	}
-	return -1
+	return strings.Join(parts, " ")
 }
 
 func (tr toolRules) matchesAnyRule(line string) bool {
@@ -842,6 +1012,7 @@ func (e *Engine) InputDraft(tool, pane string) (string, bool) {
 	if !ok || tr.activityCutoff == nil {
 		return "", false
 	}
+	pane = tr.normalize(pane)
 	// An input_prefix declares a composer drawn above the cutoff
 	// (opencode's ┃ box over ╹), so the text after a cutoff match is the
 	// composer's frame, never a draft.
@@ -1021,6 +1192,7 @@ func (e *Engine) TurnEndedState(tool, region string) string {
 	if !ok {
 		return Finished
 	}
+	region = tr.normalize(region)
 	lines := strings.Split(region, "\n")
 	last := lastContentIndex(lines, len(lines)-1, tr.chromeLine)
 	if last >= 0 && strings.Contains(lines[last], "?") {

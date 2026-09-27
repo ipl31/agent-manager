@@ -129,6 +129,16 @@ type Tool struct {
 	// preview's height, not only grow it. A tool opts in once a height
 	// shrink is measured to keep its scrollback. Codex clears it (#369).
 	FitsHeight bool `toml:"fits_height"`
+	// SidePanel tells the engine that this tool can draw a right-hand
+	// session panel on wide panes. When enabled, the engine detects the
+	// panel's column from the captured frame and strips it before status
+	// rules or quotes see the text.
+	SidePanel bool `toml:"side_panel"`
+	// EchoOpensTurn tells LastUserEcho that the newest user prompt is the
+	// first echo row after the previous turn boundary, not the last echo
+	// row in the activity region. This avoids quoting tool output that
+	// shares the same echo marker as the prompt.
+	EchoOpensTurn bool `toml:"echo_opens_turn"`
 }
 
 type Config struct {
@@ -434,6 +444,11 @@ revive_command = "opencode --continue"
 # session prompt travels behind this flag
 prompt_flag = "--prompt"
 default_status = "idle"
+# opencode draws a right-hand session panel beside the transcript on wide
+# panes. side_panel detects and strips it per-frame; echo_opens_turn keeps
+# LastUserEcho on the prompt even when tool output shares the ┃ gutter.
+side_panel = true
+echo_opens_turn = true
 activity_cutoff = "(?m)^\\s*╹"
 # The composer is the gutter row the caret sits on: opencode keeps the caret
 # on the draft's own text row (live-verified, caret tracking every keystroke),

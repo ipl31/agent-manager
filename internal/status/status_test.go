@@ -1,6 +1,8 @@
 package status
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -1896,5 +1898,65 @@ func TestMusePromptAndReply(t *testing.T) {
 	picker := "  Resume a previous session\n❯ just now    blush-polaris · hello\n  1 / 3 · 34%  enter resume  esc exit"
 	if got := engine.TypingHold("muse", picker); got != Waiting {
 		t.Fatalf("picker TypingHold = %q", got)
+	}
+}
+
+// TestOpencodeWidePaneSidebar verifies that opencode's right-hand session
+// panel is stripped before status rules or quotes see the pane, and that
+// the prompt line stays on the user's prompt during and after a foreground
+// shell command.
+func TestOpencodeWidePaneSidebar(t *testing.T) {
+	engine := defaultEngine(t)
+
+	load := func(name string) string {
+		t.Helper()
+		b, err := os.ReadFile(filepath.Join("testdata", name))
+		if err != nil {
+			t.Fatalf("read fixture %s: %v", name, err)
+		}
+		return string(b)
+	}
+
+	during := load("opencode_wide_during.txt")
+	after := load("opencode_wide_after2.txt")
+
+	prompt := "Run the shell command \\`sleep 2; echo second-done\\` in the foreground and wait for it to finish, then reply with one short sentence."
+
+	if got, _ := engine.Match("opencode", during); got != Working {
+		t.Fatalf("Match(during) = %q, want working", got)
+	}
+	if got, _ := engine.Match("opencode", after); got != Finished {
+		t.Fatalf("Match(after) = %q, want finished", got)
+	}
+
+	if got, ok := engine.LastUserEcho("opencode", during); !ok || got != prompt {
+		t.Fatalf("LastUserEcho(during) = %q ok=%v, want prompt", got, ok)
+	}
+	if got, ok := engine.LastUserEcho("opencode", after); !ok || got != prompt {
+		t.Fatalf("LastUserEcho(after) = %q ok=%v, want prompt", got, ok)
+	}
+
+	for _, label := range []string{"$0.00 spent", "LSPs are disabled", "Context", "20,616 tokens", "10% used"} {
+		if got, _, _ := engine.LastMessage("opencode", after); strings.Contains(got, label) {
+			t.Fatalf("LastMessage(after) contains sidebar %q: %q", label, got)
+		}
+	}
+
+	if got, _, _ := engine.LastMessage("opencode", after); got != "The command finished and printed second-done." {
+		t.Fatalf("LastMessage(after) = %q, want reply", got)
+	}
+
+	text, _, ok := engine.FullTurnText("opencode", after)
+	if !ok {
+		t.Fatal("FullTurnText(after) not ok")
+	}
+	if strings.Contains(text, "$0.00 spent") || strings.Contains(text, "LSPs are disabled") {
+		t.Fatalf("FullTurnText(after) contains sidebar: %q", text)
+	}
+	if strings.Contains(text, "$ sleep 2") || strings.Contains(text, "\nsecond-done") {
+		t.Fatalf("FullTurnText(after) contains shell command/output: %q", text)
+	}
+	if !strings.Contains(text, "The command finished and printed second-done.") {
+		t.Fatalf("FullTurnText(after) missing reply: %q", text)
 	}
 }
