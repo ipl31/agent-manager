@@ -73,6 +73,91 @@ Record the results in this file before writing production code.
 7. **Cost.** Time the three GETs on an idle and a busy session. The
    poller ticks every second across all sessions.
 
+## Phase 1 results
+
+Ran 2026-09-30 against OpenCode 1.18.33 on Linux: throwaway `HOME`,
+dedicated tmux socket, TUI on `127.0.0.1:18456` with
+`OPENCODE_SERVER_PASSWORD` set. The default model ("Big Pickle" via
+OpenCode Zen) answers with no credentials at $0.00, so every turn below
+was free. Raw captures are in
+[`spike/`](spike/) (`00_` baselines, `01–05` status and messages,
+`06` the full `/doc` spec, `07–08` pending dialogs, `09–10` tool and
+compaction parts, `11` the session list).
+
+1. **Bind failure: the TUI wedges, so a failed bind needs a relaunch,
+   not a pane fallback.** With the `--port` taken by another listener,
+   the process stays alive but never draws (blank screen), serves
+   nothing, ignores `q`, and does not recover when the port frees up;
+   SIGINT kills it. Phase 2 must kill and relaunch once with a new
+   port when the server is unreachable shortly after launch; falling
+   back to the pane would strand the session on a blank screen.
+2. **Auth: basic, default username `opencode`, whole API gated.**
+   The TUI works normally with the password set. Unauthenticated and
+   wrong-password requests get 401 with an empty body, including
+   `/doc`. With `OPENCODE_SERVER_USERNAME` unset, the username is
+   `opencode`; the Phase 3 client authenticates as
+   `opencode:<password>`.
+3. **Idle sessions are absent from `/session/status`; fast turns never
+   appear.** A turn reads `{"ses_…": {"type": "busy"}}` and vanishes
+   when done — `{type: idle}` was never observed. There is a brief
+   absence right after submit before `busy` appears, so a turn shorter
+   than the poll interval looks like idle throughout. Phase 3 must
+   treat absence as idle-or-finished AND track the newest message id:
+   an id advance while absent means a turn completed unseen.
+   Interrupt: `esc` did not stop a long single-step reasoning turn
+   (still `busy` after 2.5 minutes and three attempts); aborting via
+   `POST /session/{id}/abort` cleared the entry at once and the pane
+   showed its usual `· interrupted` footer. A provider retry could not
+   be triggered on demand; implement `retry` from the spec
+   (`attempt`, `message`, `next`) and treat it as working.
+4. **Dialogs list while on screen, clear when answered, and status
+   stays `busy` throughout.** `/permission` returns the bash request
+   (id, session, patterns, command metadata) and `/question` the
+   question (header, options) until answered in the TUI, then `[]`.
+   Pending-wins-over-`busy` precedence is confirmed. The V1 lists are
+   what real dialogs populate; the V2 surface is a separate `/api/*`
+   envelope API that stayed empty — keep to the V1 routes. Note the
+   default config auto-approves `bash` and `write`; the spike set
+   `"permission": {"*": "ask"}` to trigger the dialog.
+5. **`limit=N` returns the newest N messages oldest-first; each step
+   is its own message.** A tool call and the reply text are separate
+   assistant messages, so the tail must scan newest-first for the
+   newest *text* part, not the newest message. Part types observed:
+   `step-start`, `reasoning` (carries text — never quote it),
+   `text`, `tool`, `step-finish` (with `reason`). A shell call is a
+   `tool` part named `bash` with
+   `state:{status,input,output,title,metadata:{exit}}`. Compaction
+   appends a *user* message whose only part is `{type: compaction}`
+   (no text), then an assistant summary — skip textless user messages
+   when reading the prompt. An aborted turn has no `step-finish` and
+   may have no text at all — no text part means unavailable, not
+   empty.
+6. **Nothing reveals which session is on screen (Open question 1:
+   not resolved).** `/session/status` only names busy sessions;
+   `tui.session.select` is not emitted when switching with
+   `/sessions` (SSE across a real switch showed only
+   `server.connected` and heartbeats); `/api/session/active` is `{}`
+   while idle and while busy; `time.updated` is untouched by a
+   switch. Worse, the screen can move mid-turn: switching via
+   `/tui/select-session` during a `busy` turn moved the pane while
+   the background session stayed `busy`, so "follow the busy entry"
+   is rejected too. Phase 3 should stay with the launch-time
+   `AgentSessionID` and document `/sessions` switches as a known
+   gap; asking upstream for an on-screen-session endpoint joins Open
+   question 3.
+7. **Polling is cheap: 1–8 ms per endpoint, idle or busy.**
+   `session/status`, `permission`, `question`, and
+   `message?limit=2` each answer in single-digit milliseconds on
+   loopback. No SSE needed.
+
+Unresolved: after one API abort returned `true` with status already
+clear, a final assistant message completed about a minute later. The
+aborted turn may genuinely outrun the abort, or the abort may have
+landed just after natural completion; the spike did not retest it.
+A read-only poller never aborts, so this only matters if `esc`
+aborts share it — Phase 3's pane-dialog-wins rule stays the backstop
+either way.
+
 ## Phase 2: launch
 
 All four launch paths already go through `launch.Environment`
@@ -101,8 +186,10 @@ change.
 - Don't store the port or password in SQLite, so no migration is
   needed. If the file is missing, the source is unavailable and the pane
   rules are used.
-- If Phase 1 shows the TUI exits on a bind failure, retry once with a
-  new port on the first-launch path. Otherwise, fall back to the pane.
+- Phase 1 shows a bind failure wedges the TUI (alive, blank screen,
+  no server, no retry), so a pane fallback would strand the session.
+  When the server is unreachable shortly after launch, kill and
+  relaunch once with a new port on the first-launch path.
 
 ## Phase 3: client and status
 
@@ -119,16 +206,18 @@ New package `internal/opencodeserver`, standard library only:
     - pending permission or question → `waiting`
     - `busy` → `working`
     - `retry` → `working` (show `retry.message` as the quote)
-    - `idle` after a busy observation → `finished`
-    - `idle` otherwise → `idle`
+    - absent after a busy observation, or absent with the newest
+      message id advanced since the last poll (a turn completed
+      unseen — Phase 1 never observed `{type: idle}`) → `finished`
+    - absent otherwise → `idle`
     - `sess.Acked` handled the same way as in `applyHookStatus`
   - Reuse `applyHookStatus`'s rule that a pane dialog wins over a
     stale source, since a dialog on screen is always current.
   - If the agent isn't alive (`!agentAlive`) or the call fails → the
     current pane path.
-  - `errored`: the pane's `limit_line` and error rules still apply;
-    add the `session.error` payload only if Phase 1 shows it can be read
-    without SSE.
+  - `errored`: the pane's `limit_line` and error rules still apply.
+    Phase 1 did not surface a `session.error` payload over plain GETs,
+    so nothing is added from the server here.
 - All HTTP runs inside the poller's `refreshOnce` command, never in
   `Update`, to keep the "Update never blocks" invariant.
 - Start with polling, not SSE. Polling fits the existing tick, has no
@@ -144,6 +233,10 @@ New package `internal/opencodeserver`, standard library only:
 - For `opencode-server`, the server tail is the primary source, not only
   a recovery path. The screen can't reliably tell prompts from tool
   output, so use the API first and the pane only when it's unavailable.
+  Read newest-first: the prompt is the newest user *text* part (skip
+  textless compaction markers) and the reply the newest assistant
+  *text* part (skip reasoning-only and tool-only messages); a turn
+  with no text part counts as unavailable.
 - Cache per session, keyed on the newest message id and part count, the
   same way `claudeTailCache` is keyed on file stats.
 - Pass the prompt through `typedPrompt` and `isManagerEcho`, as
@@ -197,20 +290,23 @@ Each test goes in the `_test.go` file next to the code it covers.
 
 ## Open questions
 
-1. **Which session is on screen.** This depends on Phase 1 step 6.
-   - Preferred: follow `tui.session.select` or the busy entry in
-     `/session/status`.
-   - Fallback: the session in `GET /session` scoped to the pane's
-     directory with the newest `time.updated`.
-   - When the on-screen session differs from `AgentSessionID`, should
-     the poller update `AgentSessionID` so revive resumes the session
-     the user switched to? That would match what the user expects.
+1. **Which session is on screen.** Phase 1 step 6 found no signal:
+   `tui.session.select` is not emitted on picker switches,
+   `/api/session/active` is always `{}`, `time.updated` is untouched
+   by a switch, and the screen can move mid-turn so the busy entry
+   need not be on screen. Stay with the launch-time `AgentSessionID`
+   and document `/sessions` switches as a known gap. If upstream
+   ever exposes the on-screen session, the poller could adopt it
+   then — and decide at that point whether to move `AgentSessionID`
+   so revive resumes the session the user switched to.
 2. **Existing sessions.** Sessions launched before this change have no
    port and keep using the pane rules until they are revived. That's
    acceptable. Say so in the release notes, not in `docs/messages.json`.
 3. **Upstream.** Ask OpenCode for `--port 0` to mean "choose a free port
    and report it", or for a Unix socket option. Either would remove the
-   port race and the loopback exposure. Not needed to ship this.
+   port race and the loopback exposure. Ask as well for a query
+   reporting which session the TUI currently shows (Phase 1 step 6
+   found no such signal). Neither is needed to ship this.
 
 ## Order and size
 

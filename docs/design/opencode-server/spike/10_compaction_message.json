@@ -1,0 +1,27 @@
+{
+ "info": {
+  "id": "msg_0f49b35dd001tmzbd8VUy0eqVV",
+  "sessionID": "ses_f0b6f5b1fffe0eC3dhjcDd16Wl",
+  "role": "user",
+  "time": {
+   "created": 1790810207709
+  },
+  "summary": {
+   "diffs": []
+  },
+  "agent": "build",
+  "model": {
+   "providerID": "opencode",
+   "modelID": "big-pickle"
+  }
+ },
+ "parts": [
+  {
+   "id": "prt_0f49b35df001RjtPoJuLGWmBkS",
+   "sessionID": "ses_f0b6f5b1fffe0eC3dhjcDd16Wl",
+   "messageID": "msg_0f49b35dd001tmzbd8VUy0eqVV",
+   "type": "compaction",
+   "auto": false
+  }
+ ]
+}

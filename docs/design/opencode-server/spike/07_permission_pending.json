@@ -1,0 +1,1 @@
+[{"id":"per_0f4983cab001laMKU43BKOSHO5","sessionID":"ses_f0b67cf7bffeYUgg5cqltleD3q","permission":"bash","patterns":["echo PERM-DIALOG-TEST"],"metadata":{"command":"echo PERM-DIALOG-TEST"},"always":["echo *"],"tool":{"messageID":"msg_0f49830b5001WTCdXdVN7QVmLO","callID":"call_function_pbp1fvfvgkw7_1"}}]
