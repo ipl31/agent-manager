@@ -1,247 +1,385 @@
 # Darwin native child identity development plan
 
-This plan takes the validated design for issue
-[#530](https://github.com/YoanWai/agent-manager/issues/530) from implementation
-through review and release readiness. The outcome is deliberately narrow:
-Darwin stops launching the slow multi-PID `ps` command used only to name a
-pane's direct children, while process-tree metrics, Linux and WSL2 behavior,
-the public API, and user configuration remain unchanged.
+Status: not release-ready. The branch contains an initial implementation and
+useful Apple Silicon measurements, but correctness, privacy, safe reproduction,
+and evidence gates remain open. No pull request is open. The checkpoints below
+separate historical observations from requirements that the final revision
+must satisfy; a documented runtime gap does not waive a blocking safety gate.
 
-The implementation and Apple Silicon validation are complete on the feature
-branch. No pull request is open. The remaining work is to close or explicitly
-document the platform confidence gaps, perform the final review pass, and
-prepare one focused pull request when authorized.
+The intended outcome for issue
+[#530](https://github.com/YoanWai/agent-manager/issues/530) remains narrow:
+Darwin stops launching the slow multi-PID `ps` command used to name a pane's
+direct children. Process-tree metrics, Linux and WSL2 behavior, the public
+`Trees`/`ProcStat` contract, and user configuration remain unchanged.
 
-The architectural rationale is in
-[`darwin-process-info.md`](darwin-process-info.md). Reproduction methodology,
-raw measurements, checksums, and live verification are in
-[`research/darwin-process-info`](research/darwin-process-info/README.md).
+This is the canonical readiness checklist. The initial architectural rationale
+is in [`darwin-process-info.md`](darwin-process-info.md), and historical data is
+in [`research/darwin-process-info`](research/darwin-process-info/README.md).
+Their broad completion and failure-safety claims require reconciliation with
+this checklist before release. Existing raw measurements remain historical
+evidence and must not be rewritten to imply that pending tests have passed.
 
-## Delivery decision
+## Evidence baseline
 
-Use the existing gopsutil dependency as a private Darwin adapter inside
-`internal/sysstat`:
+The implementation is in commit `efd1462`; this plan was initially added in
+`37f3089`. Review found a clean worktree, matching checksums for all five
+published evidence files, and an unmodified module cache (`go mod verify`).
+Those checks establish artifact integrity, not completion of the new gates.
 
-1. Build the process tree and metrics with the existing machine-wide `ps`
-   pass.
-2. Pass each direct-child PID and its sampled parent into a platform-specific
-   identity lookup.
-3. On Darwin, read the current parent with `Ppid` and the argument vector with
-   `CmdlineSlice`, retaining only `argv[0]`.
-4. On Linux and WSL2, retain the existing scoped `ps` command and parser.
-5. Accept a name only when the observed parent still matches the sampled
-   parent.
+Keep these three measurements distinct:
 
-Do not add a Darwin fallback to `ps`. A fallback would restore the incident
-under load and conceal a native lookup defect. A failed lookup omits identity
-for that child until the next poll; metrics and liveness continue to come from
-the first pass.
+| Source | Host and observation | What it supports |
+|---|---|---|
+| Issue reporter | macOS 26.5.2; about 1,800 processes; the scoped call reportedly took 3.1 seconds amid 13 managers | The original operational incident; native runtime validation on this host is pending |
+| [Maintainer reproduction](https://github.com/YoanWai/agent-manager/issues/530#issuecomment-5735758235) | macOS 26.5.1; about 900 processes; five-PID medians of 135.1 ms for the original call and 9.8 ms with `-x` | The separate reproduction and Darwin-only flag alternative |
+| Checked-in target run | macOS 15.5 (24F74), M2 Ultra, 24 logical CPUs; original two-PID benchmark median 3.705 ms, native 0.032 ms | A faster host reproduces the one-to-two-PID cost discontinuity and measures the initial native adapter |
 
-## Scope boundaries
+The first two figures are reported in the issue, not measurements from this
+branch. Multiplying lookup duration by managers and polls estimates aggregate
+lookup wall time. It does not measure CPU saturation or prove a self-sustaining
+load feedback loop. Do not claim that removing this call resolves every cost
+of multiple managers; scheduling and duplicate polling remain out of scope.
 
-The change includes the shared identity contract, Darwin implementation,
-unchanged Linux implementation behind a platform file, regression tests,
-target benchmarks, live application verification, and documentation.
+## Architecture and scope
 
-It does not include:
+Retain the platform boundary already implemented in `internal/sysstat`:
 
-- replacing the machine-wide metrics collector;
-- changing CPU or memory accounting;
-- changing poll scheduling or detached-client behavior;
-- electing one poller across manager processes;
-- exporting a reusable process library;
-- adding configuration, feature flags, schema changes, or tool definitions;
-- changing any agent CLI's status rules.
+1. Build process-tree metrics with the existing machine-wide
+   `ps -axo pid=,ppid=,pcpu=,rss=,time=` pass.
+2. Select direct-child candidates and retain their sampled roots in shared
+   code. Keep shared validation and application to `ProcStat.Children` there.
+3. Resolve Darwin identities serially through a private native adapter. The
+   existing gopsutil dependency is the starting point, subject to the identity
+   and privacy design gates below.
+4. Keep the existing scoped `ps` command and parser on Linux and WSL2.
+5. Publish identities for a Darwin root only after every sampled candidate
+   for that root passes completeness, generation, parent, and argv checks.
 
-These exclusions keep the patch within the Thin Wrapper Principle and make a
-performance rollback independent of unrelated polling or product decisions.
+There is no automatic Darwin `ps` fallback, cache, goroutine fan-out, feature
+flag, new setting, or tool-specific discovery rule. CPU, RSS, cumulative CPU
+time, process count, and liveness continue to use the first pass. Native lookup
+failure must withhold the affected root's entire identity set, leaving other
+roots and all tree metrics intact.
+
+Scope includes the private identity contract, adapter corrections, regression
+and consumer tests, target validation, evidence, and a prepared recovery patch.
+It excludes replacing the metrics collector, changing accounting or poll
+scheduling, electing a shared poller, exposing a process library, adding schema
+or configuration, and changing agent CLI definitions or status rules.
+
+Review confirmed several concerns do not require additional implementation:
+
+- The Linux extraction preserves the previous command, parser, filtering,
+  and ordering. Broader native Linux work is unnecessary for this fix.
+- Darwin and Linux are the released OS targets; Windows runs through WSL2.
+  Missing native Windows or FreeBSD adapters are not release-matrix defects.
+- `process.Process{Pid: ...}` is sufficient for the pinned dependency's `Ppid`
+  and `CmdlineSlice` methods. They do not require `NewProcess` initialization.
+  Whether the completed design needs an additional generation query is a
+  separate decision; its cost must be measured.
+- `refreshOnce` and `runMu` serialize polls within a manager. Adding overlapping
+  poll suppression would not address this incident.
+
+## Blocking identity design gates
+
+### Root completeness and consumer-state preservation
+
+Status: pending; required before release.
+
+The current adapter returns successful children even when another child's
+query fails. This is unsafe for `detectRelaunchedTool`: if the current tool's
+child is missing but another recognized child remains, the poller can switch
+tools, remove hooks, and clear the conversation ID. A later good sample cannot
+automatically restore that ID. Calling this per-child behavior "fail closed"
+or merely a delay is incorrect.
+
+Make Darwin identity all-or-nothing per sampled root. A query error, missing
+candidate, empty or ambiguous command, parent mismatch, or generation mismatch
+invalidates that root's identity sample. Pass no partial list to relaunch
+detection. Preserve the public API by enforcing completeness in the private
+transport/application boundary, with explicit platform ownership so Linux
+behavior does not change incidentally.
+
+Required deterministic tests cover:
+
+- the current tool and another recognized tool both present, with either the
+  current child's parent query or command query failing;
+- an all-failed root and a complete neighboring root in the same sample;
+- empty, ambiguous, vanished, and reparented candidates;
+- unchanged stored tool, conversation ID, and hook contents after each
+  incomplete sample and after a later successful sample of the original tool;
+- a complete genuine relaunch still changing the tool and clearing only the
+  old tool's metadata as intended;
+- unchanged `OK`, `PCPU`, `CPUSeconds`, `CPUPercent`, `RSS`, `RamPercent`, and
+  process count when identity is withheld, plus direct-child order when valid.
+
+The implementation must settle where completeness is represented and checked.
+Tests must cross the adapter/shared-policy boundary and exercise the poller's
+persistent side effects, rather than only testing an empty returned slice.
+
+### Exact argv identity and privacy
+
+Status: pending design decision and target tests; required before release.
+
+The pinned gopsutil v4.26.8 Darwin `parseCmdline` implementation documents that
+an empty `argv[0]` is indistinguishable from padding and can leak an environment
+entry into its result. Skipping initial empty chunks can also promote a later
+argument into position zero. Checking that the returned first string is
+nonempty does not prove it is the process's actual `argv[0]`.
+
+Add Darwin tests with exact absolute paths and spaces, empty `argv[0]` with
+remaining arguments, empty `argv[0]` without remaining arguments, and a
+zero-argument process where the OS permits it. Use only synthetic argument and
+environment sentinels. Establish what the OS and dependency return; require
+that no sentinel becomes `ProcStat.Children`, a log entry, or a tool change.
+An unsupported fixture shape must be explained with target evidence, not
+silently counted as covered.
+
+Choose and document a native mechanism that can establish exact `argv[0]` or
+reliably reject ambiguous identities. A caller cannot safely infer an empty
+original argv from the dependency's already-shifted result. If the pinned API
+cannot meet the contract, record the necessary adapter or dependency change
+and revise scope before implementing it; do not silently weaken the guarantee
+or substitute an executable basename with different semantics. Keep the gate
+open until the chosen mechanism and its failure behavior are tested.
+
+Only a verified `argv[0]` may leave the platform boundary. Native argument
+buffers necessarily exist transiently; non-identity arguments and environment
+values must not be retained in application state or logged. Existing artifact
+inspection found no raw command lines or credentials, but that does not prove
+the missing empty-argv behavior is safe.
+
+### Process generation across native queries
+
+Status: pending design decision and deterministic tests; required before release.
+
+The current parent read precedes the command read. A PID can exit, be reaped,
+and be reused between those operations, pairing the old parent with an
+unrelated process's command. Shared validation then accepts a pair that was
+never observed together. The existing wrong-parent and already-exited tests do
+not exercise this interval.
+
+Establish that the native reads used for an accepted identity refer to one
+process generation and the sampled root. Select a native generation token or
+equivalent mechanism, document its resolution and comparison semantics, and
+validate it across the command query. A second PPID read can detect some
+changes, but cannot prove generation identity or exclude same-parent PID reuse.
+Do not treat `NewProcess` or a cached creation time as proof without inspecting
+the actual native queries. Verify whether generation continuity can also be
+established from the original tree sample; do not claim that guarantee if the
+sample contains only PID and PPID.
+
+Use a deterministic query seam to model exit, reparenting, exec, reuse under a
+different parent, and same-parent reuse between reads. Reject a mixed-generation
+result and invalidate its root before consumer side effects. Supplement these
+tests with bounded real-process churn on Darwin, without forcing PID exhaustion.
+Document the remaining window after validation and distinguish same-generation
+exec from PID reuse. Process sampling is not atomic: any residual false-positive
+risk requires an explicit design decision and mitigation, not a claim that the
+next poll only corrects temporary identity loss.
 
 ## Acceptance criteria
 
-| Area | Required result | Evidence |
+Every pending blocking criterion must pass on the final revision. Historical
+passes remain useful baselines, not substitutes for rerunning changed code.
+
+| Area | Required result and evidence | Current disposition |
 |---|---|---|
-| Darwin process launches | A live poll launches the machine-wide metrics `ps` and no scoped `ps -p` child-name command | Trace the argv of every `ps` call during a disposable live run |
-| Child identity | Direct children return their exact `argv[0]`, including absolute paths and values containing spaces | Darwin process test and live relaunch test |
-| PID safety | A child is accepted only when its observed parent matches the parent in the sampled process tree | Shared wrong-parent test and Darwin wrong-parent test |
-| Failure behavior | Exited, inaccessible, or empty-command children are skipped without invalidating tree metrics or liveness | Shared policy tests and an exited-child Darwin test |
-| Ordering | `ProcStat.Children` retains the direct-child order from the sampled tree | Shared unit test |
-| Linux and WSL2 | The existing command, parser, selection behavior, and output contract remain unchanged | Linux parser and tree tests; WSL2 uses the Linux build path |
-| API and configuration | `Trees`, `ProcStat`, config, store schema, and tool definitions do not change | Diff review |
-| Privacy | Only `argv[0]` leaves the Darwin platform file; arguments and environment values are neither retained nor logged | Code review and evidence-file inspection |
-| Performance | Native lookup is materially faster for one, two, and five direct children and removes the two-PID discontinuity from agent-manager | Bounded target benchmark against current `ps` and Darwin `ps -x` |
-| Build matrix | CGO-disabled Darwin arm64 and amd64 builds compile; Linux build, race suite, vet, and formatting pass | Repository completion commands |
+| Root completeness | All-or-nothing Darwin identity per root; consumer tests preserve tool, conversation ID, and hooks on incomplete samples | Blocking, pending |
+| PID consistency | Validated process generation across native reads, sampled-parent checks, and deterministic mid-lookup race tests | Blocking, pending |
+| Identity and privacy | Exact verified `argv[0]`; ambiguous/empty cases cannot expose arguments or environment values | Blocking, pending design and target tests |
+| Metrics and ordering | All identity failures preserve every tree field; accepted direct children retain sampled order | Partial historical coverage; expanded tests pending |
+| Darwin process launches | Automated launch-count regression test plus live argv trace: one metrics `ps`, no scoped child-name `ps` | Historical trace available; automated gate and final live run pending |
+| Linux and WSL2 | Existing command, parser, selection, and output behavior remain unchanged | Extraction reviewed; final tests and runtime dispositions below |
+| API and configuration | `Trees`, `ProcStat`, config, schema, and tool definitions unchanged | Initial diff satisfies boundary; recheck final diff |
+| Performance | Bounded comparison for one, two, and five children using the completed safe adapter | Initial Apple Silicon data available; final measurements pending |
+| Validation safety | Per-command deadlines, overall deadlines, load checks, independent cleanup, and no default tmux socket | Harness changes and documented live procedure pending |
+| Build matrix | CGO-disabled production and focused test binaries compile for all four release targets; repository checks pass | Final logs pending |
+| Evidence and recovery | Reproducible live/state artifacts and a verified Darwin-only recovery patch | Blocking, pending |
 
-Performance results should remain evidence rather than a timing assertion in
-CI. Absolute timings vary by macOS version and host activity; structural tests
-for the absence of the second process launch are deterministic.
+Performance measurements are evidence, not CI timing assertions. Add the
+deterministic no-scoped-launch test explicitly; it does not exist merely because
+the current source and historical trace contain no such launch.
 
-## Work sequence
+## Claim-to-artifact evidence checklist
 
-### Freeze the behavior being replaced
+Record source revision, clean/dirty status, Go and dependency versions, build
+commands, binary SHA-256, OS build, architecture, and relevant CLI/tmux/terminal
+versions with each final run. Store sanitized artifacts and a manifest with
+checksums. Hashes alone do not connect an output file to the claimed binary.
 
-Status: complete.
+| Claim | Retained evidence | Missing evidence / next gate |
+|---|---|---|
+| Initial `ps` discontinuity | `2026-09-30-macos-15.5-ps.jsonl`: 120 samples and six summaries; harness and checksum match | Retain as baseline; record safe rerun commands and target metadata |
+| Initial native speed | `2026-09-30-macos-15.5-go-bench.txt`: 90 benchmark results; checksum matches | Exact invocation/build provenance and final-adapter rerun pending |
+| Initial Darwin sysstat tests pass | `2026-09-30-macos-15.5-sysstat-tests.txt`: verbose passing output; checksum matches | Newly required error, race, privacy, and consumer tests are absent; final run pending |
+| Live run had no scoped `ps` | `2026-09-30-macos-15.5-live-ps-calls.txt`: 87 metrics-only argv records; checksum matches | Wrapper, executable resolution, run script, build provenance, and final trace pending |
+| Live process stats, responsiveness, waiting state, and liveness | README narrative only | Sanitized TUI frames and session-state snapshots before/after CLI exit pending |
+| Relaunch changes the correct row | README describes real Claude followed by `sleep` with `argv[0]=codex` | Before/after session JSON and reproducible commands pending; this is synthetic identity plumbing, not a real Codex run |
+| Failures preserve session state | No retained consumer failure evidence | Deterministic tool/conversation/hook assertions and sanitized results pending |
+| Test processes and sockets were cleaned up | README narrative only | Owned PID/socket manifest, cleanup transcript, final process/load/memory checks pending |
+| All release architectures compile and repository gates pass | Prior build claims, without retained completion logs in this evidence directory | Final revision logs for each build and repository gate pending |
+| Recovery is deployable | No prepared recovery artifact | Reviewed patch, build hash, validation results, and application instructions pending |
 
-- Record that the second lookup supplies only direct-child identity for tool
-  relaunch detection.
-- Confirm that CPU, RSS, process count, cumulative CPU time, and liveness come
-  from the first pass.
-- Reproduce the one-to-two-PID cost discontinuity with a bounded sequential
-  harness.
-- Compare the current call, Darwin `-x`, and native lookup without creating a
-  large process population.
+Rerun missing live evidence rather than reconstructing old frames or state.
+Keep synthetic fixtures clearly labeled and never capture real prompts,
+credentials, environment dumps, or arbitrary process command lines. A sanitized
+fixture frame/session snapshot is allowed evidence; redact it before publishing.
 
-Exit condition: the old contract and performance trigger are captured in raw,
-checksummed evidence.
+## Coverage matrix
 
-### Separate shared policy from platform mechanics
+Refresh these inventories against `.goreleaser.yaml` and `builtinTools` before
+the PR. "Unchanged" describes reviewed code behavior, not a runtime test pass.
+The PR must name untested values and what testing them requires. A maintainer
+may accept a stated runtime confidence gap; the blocking identity/privacy,
+consumer-state, harness-safety, and recovery gates cannot be waived by omitting
+their platform or tool from the matrix.
 
-Status: complete.
+### Platforms and architectures
 
-- Add internal `childRef` and `namedChild` transport types in
-  `internal/sysstat/sysstat.go`.
-- Keep candidate selection and application to `ProcStat` in shared code.
-- Move command execution and parsing out of shared code.
-- Keep parent validation in shared policy even when Darwin rejects a mismatch
-  early.
+| Runtime | Current disposition | Remaining gate or explicit runtime gap |
+|---|---|---|
+| Darwin arm64, macOS 15.5 | Tested initial sysstat/native benchmark; live behavior partly narrative | Final CGO-disabled build, expanded tests, complete live artifacts, and benchmark |
+| Darwin, macOS 26.5.1 / 26.5.2; architecture to record | Untested fixed build on the maintainer/reporter hosts | Bounded affected-host validation; identify actual architecture when a host is available, otherwise disclose |
+| Darwin amd64 | Cross-compilation reported; no retained log or Intel runtime evidence | Final CGO-disabled production/test builds; Intel native smoke/runtime test or named gap |
+| Linux amd64 | Identity extraction unchanged by review; final check logs pending | Production/test build, race suite, parser/tree tests, consumer tests, and scoped runtime evidence |
+| Linux arm64 | Identity extraction unchanged by review; build/runtime evidence absent | Explicit CGO-disabled production/test builds; runtime smoke test or named gap |
+| WSL2, Linux amd64/arm64 as applicable | Linux identity path unchanged; runtime untested | Focused tree/parser and live-session checks on available WSL2 architecture; name remaining architecture/runtime gaps |
 
-Exit condition: callers of `Trees` are unchanged, and shared code contains no
-Darwin branch.
+WSL2 host-stat interop is outside this identity change, but an unchanged Linux
+build path alone is not WSL2 runtime evidence. No native Windows or FreeBSD
+release build is required by the current release configuration.
 
-### Implement both platform adapters
+### Tools
 
-Status: complete.
+| `builtinTools` entry | Current disposition | Required evidence or disclosure |
+|---|---|---|
+| `claude` | Real startup at theme chooser reported; live artifacts pending | Reproduce startup, steady identity, exit, and relaunch with state artifacts |
+| `opencode` | Untested native identity runtime | Real installed CLI launch/identity/relaunch smoke test or explicit gap |
+| `codex` | Real CLI untested; only synthetic `sleep` named `codex` reported | Real Codex smoke test; keep synthetic plumbing result separate |
+| `muse` | Untested native identity runtime | Real CLI smoke test or explicit gap |
+| `grok` | Untested native identity runtime | Real CLI smoke test or explicit gap |
+| `gemini` | Untested native identity runtime | Real CLI smoke test or explicit gap |
+| `hermes` (`hermes --cli`) | Untested native identity runtime | Real CLI smoke test with shipped invocation or explicit gap |
+| `terminal` | Tool retyping inapplicable; shell rows must remain shell rows | Root stats/liveness and no-retyping regression; live shell artifact pending |
+| `pi` | Untested native identity runtime | Real CLI smoke test or explicit gap |
+| `command-code` (`cmd`) | Untested native identity runtime | Real CLI smoke test with shipped invocation or explicit gap |
 
-- In `internal/sysstat/child_names_darwin.go`, query `Ppid` before
-  `CmdlineSlice`, process candidates serially, and return only `argv[0]`.
-- Construct a lightweight `process.Process` handle directly so
-  `NewProcess` does not add redundant existence and creation-time queries.
-- In `internal/sysstat/child_names_linux.go`, preserve the existing scoped
-  `ps` invocation and parser byte-for-byte in behavior.
-- Add no fallback, cache, goroutine fan-out, setting, or new dependency.
+Record the installed invocation shape and version without hardcoding a catalog
+of upstream process names. Cover native binaries and encountered interpreter or
+wrapper launches; existing interpreter ambiguity must keep the stored tool.
+An unsupported identification shape is a limitation to disclose, not a reason
+to guess or add provider-specific heuristics. Healthy unchanged-tool samples
+must preserve conversation IDs and hooks as well as the displayed tool.
 
-Exit condition: Darwin has no child-name process launch and Linux produces the
-same `ProcStat.Children` values as before.
+### Terminals, transport, tmux, and input
 
-### Add regression and platform tests
-
-Status: complete.
-
-- Test shared parent validation, empty identities, child ordering, and
-  unchanged tree metrics.
-- Test the Linux parser independently from shared policy.
-- On Darwin, test a real child, exact `argv[0]` with spaces, wrong-parent
-  rejection, and a child that has already exited.
-- Keep the comparative Darwin benchmark beside the implementation tests so it
-  can be rerun with a fixed iteration count.
-
-Exit condition: production behavior is covered without making ordinary CI
-depend on host timing.
-
-### Validate on an isolated Apple Silicon target
-
-Status: complete.
-
-- Run the bounded baseline and comparative benchmark.
-- Build with `CGO_ENABLED=0` and run the complete `internal/sysstat` suite on
-  macOS.
-- Run the full manager with a throwaway `HOME`, short dedicated
-  `TMUX_TMPDIR`, explicitly named outer socket, and disposable store.
-- Exercise two pane roots with direct children and start a real supported CLI
-  without submitting a model prompt.
-- Trace every external `ps` argv and prove that only the machine-wide metrics
-  form remains.
-- Stop the CLI, run a different recognized `argv[0]` in the same pane, and
-  verify that the stored tool changes on the next poll.
-- Stop both explicit tmux servers and verify that no test process remains.
-
-Exit condition: process accounting, liveness, status detection, and relaunch
-detection work in the real application with zero scoped `ps -p` calls.
-
-### Close platform confidence gaps
-
-Status: remaining before final review, or explicitly disclosed in the pull
-request Scope section.
-
-- Ask the issue reporter to run the fixed build on the affected macOS 26.x
-  host and capture the same bounded benchmark. This confirms the absolute
-  regression is gone where it originally measured about 135 ms.
-- Run a Darwin amd64 smoke test on Intel hardware if available. The amd64
-  binary already cross-compiles; runtime coverage is the remaining gap.
-- Run the focused Linux tree and parser tests under WSL2 if a host is
-  available. WSL2 takes the unchanged Linux path, so lack of a host must be
-  stated rather than hidden.
-
-These are confidence checks, not reasons to widen the implementation. The
-structural result—Darwin no longer executes the problematic command—does not
-depend on reproducing a particular absolute latency.
-
-### Prepare one reviewable pull request
-
-Status: pending authorization.
-
-- Keep this as one pull request. Splitting the shared contract from its two
-  platform implementations would create an incomplete build or an
-  unvalidated intermediate behavior.
-- Fill the pull request template's Scope section with the intended behavior,
-  explicit non-goals, tested platforms, and any remaining runtime gaps.
-- Lead the description with the user-visible result: macOS polling no longer
-  launches the pathological multi-PID child-name `ps` command.
-- Include the benchmark table and live `ps` trace summary, linking to raw data
-  rather than pasting all samples into the description.
-- State that Linux and WSL2 intentionally retain the existing implementation.
-- Do not claim that the entire process collector is native; the machine-wide
-  metrics pass remains `ps` by design.
-
-Exit condition: a reviewer can distinguish intended scope from incidental
-refactoring and can reproduce every important claim.
-
-## File responsibilities
-
-| File | Responsibility |
-|---|---|
-| `internal/sysstat/sysstat.go` | Select direct-child candidates, define the private transport types, validate parent identity, and update `ProcStat.Children` |
-| `internal/sysstat/child_names_darwin.go` | Read PPID and `argv[0]` through gopsutil's Darwin-native methods |
-| `internal/sysstat/child_names_linux.go` | Preserve the scoped `ps` command and parser for Linux and WSL2 |
-| `internal/sysstat/sysstat_test.go` | Cover shared ordering, parent validation, and metrics invariants |
-| `internal/sysstat/child_names_darwin_test.go` | Cover native behavior and hold the bounded comparative benchmark |
-| `internal/sysstat/child_names_linux_test.go` | Lock the existing parser behavior |
-| `internal/ui/poller.go` | Update the stale comment describing the platform identity lookup; no logic change |
-| `docs/darwin-process-info.md` | Record the architecture, tradeoffs, and failure model |
-| `docs/research/darwin-process-info/` | Preserve the harness, raw results, live trace, target tests, checksums, and limitations |
-
-No changes belong in `go.mod`, `internal/config`, `internal/store`, tool
-definitions, settings UI, or the poller's scheduling loop.
+| Surface | Current disposition | Required evidence or applicability statement |
+|---|---|---|
+| Plain local terminal, any emulator | Terminal protocol path unchanged; representative live artifact pending | Record actual emulator/TERM and capture a local disposable run; disclose untested variants |
+| Terminal over SSH | No SSH-specific identity branch; runtime artifacts pending | Record client/server placement and capture an SSH-driven run; identity is read on the manager host |
+| Mosh/reconnect scenario from the issue | Untested; transport/scheduling behavior unchanged | Disclose gap; no thirteen-manager reproduction or claim to fix abandoned-manager polling |
+| tmux 3.1 minimum and newer supported tmux | No new tmux API or version gate | Record tested version; run minimum-version smoke test or name the gap |
+| Keyboard | Input implementation unchanged; no new action | Confirm existing live session navigation/relaunch flow; record exercised keys |
+| Mouse | Input implementation unchanged; no new clickable surface | Confirm equivalent existing live navigation flow; record exercised controls |
+| New key/mouse bindings, clipboard, links, notifications, themes | Inapplicable: this change adds none | State applicability in the PR; do not claim exhaustive terminal feature testing |
 
 ## Safe target validation procedure
 
-The target harness must make loss of SSH responsiveness unlikely and ensure
-that cleanup does not depend on the manager remaining healthy.
+Status: pending harness corrections. The following is the required procedure,
+not a claim that the current harness implements every safeguard.
 
-1. Record OS build, architecture, logical CPUs, memory, process count, load,
-   and memory pressure before starting.
-2. Refuse to start above a target-specific load threshold. The validated
-   24-CPU host used a one-minute-load ceiling of 12.
-3. Run lookups serially with a two-second command timeout and a total deadline.
-4. Use existing stable PIDs for the `ps` baseline. Do not synthesize hundreds
-   of processes to reproduce a trigger that occurs at two PIDs.
-5. Limit the Go benchmark to five sleeping children, fixed iterations, and a
-   test timeout. Ensure children expire even if cleanup is interrupted.
-6. Run the application only under explicit disposable tmux sockets and a
-   throwaway home. Never address the default tmux socket.
-7. Capture only timing, counts, load, test output, and `ps` argv. Do not record
-   process command lines, prompts, environment variables, or credentials.
-8. Stop the named test servers, verify all test PIDs are gone, recheck load and
-   memory pressure, then remove generated toolchains and binaries only after
-   evidence has been copied.
+1. Record the target metadata, process count, load, and memory pressure. Set a
+   host-specific load ceiling before launch; the historical 24-CPU host used
+   12. Do not carry that ceiling unchanged to a smaller host. Refuse a run above
+   the ceiling and check it during each benchmark and live phase.
+2. Enforce a two-second deadline on every external benchmark command, including
+   initial `/bin/ps -axo pid=` discovery. The Python harness currently leaves
+   that discovery unbounded, and the Go benchmark uses `exec.Command` without
+   a deadline: correct both before remote reruns. Limit each timeout to the
+   remaining overall deadline and abort on timeout, nonzero exit, or unexpected
+   row count; do not summarize failed/incomplete samples as a successful run.
+3. Use stable existing PIDs for baseline selection and validate their continued
+   availability. Run commands serially. Do not create a large process population
+   or reproduce the thirteen-manager incident.
+4. Start slow-host runs small: three samples per standalone case, and three
+   fixed iterations repeated three times per Go sub-benchmark. Give each run a
+   30-second overall deadline enforced by an external supervisor. Once the
+   safeguards above exist, the intended Go arguments are
+   `-run '^$' -bench '^BenchmarkChildNames$' -benchtime=3x -count=3 -timeout=30s`.
+   The standalone arguments are `--iterations 3 --timeout 2 --deadline 30`,
+   plus the explicitly selected `--max-load` for that host. Record exact
+   commands and run order; do not publish these as safe commands for the
+   unmodified benchmark code.
+5. Keep at most five benchmark sleepers, with a 60-second natural lifetime.
+   An independent supervisor owns the deadline and tracked child PIDs; cleanup
+   must still run after test timeout, manager failure, or SSH disconnect.
+   `go test -timeout` by itself does not reap an external `ps`. Verify ownership
+   and process generation before terminating tracked PIDs, use bounded
+   escalation, reap owned processes, and verify none remain. Keep comparison
+   order recorded; interleave or rotate repetitions before making precise
+   speedup claims, and retain individual timings and failures.
+6. Run one manager under a throwaway home/store/work directory and pre-created
+   short `TMUX_TMPDIR`, unset `TMUX`, and name both the outer and manager sockets
+   explicitly. Verify actual socket paths before starting or cleaning up. Limit
+   the live phase to two pane roots, disposable children, and one real CLI
+   startup at a time, with a separately enforced 60-second phase deadline.
+7. Use disposable CLI startup without submitting a model prompt. Capture the
+   metrics-only `ps` trace, sanitized fixture frames/state transitions, test
+   assertions, timings, and resource counts. Do not log native command buffers,
+   arbitrary process command lines, prompts, credentials, or environment values.
+8. Stop both explicitly owned tmux servers, reap tracked helpers, verify their
+   PIDs and sockets are gone, and recheck load/memory pressure. Copy and checksum
+   evidence before removing validated generated binaries or toolchains. Retain
+   the cleanup transcript alongside the run manifest.
 
-Do not reproduce the thirteen-manager incident directly. Removing and tracing
-the exact expensive call, combined with a bounded microbenchmark, proves the
-solution without risking the machine-wide feedback loop described in the
-issue.
+Do not reuse the historical `100x` / ten-repeat / 60-second recipe on an
+affected host: at 135 ms, just the two multi-PID original-`ps` cases would take
+about 270 seconds and outlive the sleepers. A three-second old-path call should
+hit the two-second safety deadline and be reported as censored/aborted evidence;
+do not lengthen deadlines or retry it repeatedly to obtain a median. Continue
+native/recovery measurements only as a separately bounded run after cleanup and
+a fresh load check. Any larger sample needs a new budget based on the safe
+pilot, not an increase in process concurrency.
 
-## Repository verification
+## Work sequence and file responsibilities
 
-Run these gates from a clean worktree with the repository's exact Go version:
+1. Retain the reviewed platform extraction and historical baseline. This part
+   is complete for the initial revision, with the evidence limits above.
+2. Resolve root completeness, exact argv/privacy, and process-generation
+   decisions. Implement the smallest private adapter/policy changes and their
+   consumer tests. These are open implementation gates.
+3. Correct benchmark deadlines, supervision, validation, and cleanup; prepare
+   the reproducible live script and evidence manifest. These are pending.
+4. Run repository checks and target tests on the completed revision, then the
+   bounded benchmark and live procedure. Update the artifact and coverage
+   matrices from observed results. Historical runs do not close these gates.
+5. Prepare and verify the recovery patch. Reconcile the architecture/research
+   prose with this plan, retaining original raw data and accurate attribution.
+6. Prepare one focused PR when authorized. Runtime gaps may be presented for
+   maintainer judgment; do not present unresolved safety gates as ready to ship.
+
+| File | Responsibility |
+|---|---|
+| `internal/sysstat/sysstat.go` | Candidate/root mapping, private transport, validated application and completeness policy with unchanged public API |
+| `internal/sysstat/child_names_darwin.go` | Native generation/parent/argv validation; no partial root identity or fallback |
+| `internal/sysstat/child_names_linux.go` | Existing scoped command and parser, with no incidental Linux policy change |
+| Adjacent sysstat tests | Complete/all-failed roots, ordering, every metrics field, native query failures/races/privacy, launch-count regression, bounded benchmark |
+| `internal/ui/panetool_test.go` and relevant poller tests | Persistent tool, conversation ID, hook, and status-consumer invariants |
+| `internal/ui/poller.go` / `panetool.go` | Review identity consumer contract; scheduling and status rules stay out of scope |
+| `docs/darwin-process-info.md` | Final architecture, design decisions, consistency limits, and failure model |
+| `docs/research/darwin-process-info/` | Safe harness, exact commands, build provenance, raw results, sanitized live/state artifacts, cleanup, checksums, and coverage limits |
+
+No production/test changes are implied to have been completed by this document
+revision. No config, store schema, settings UI, tool definition, or scheduling
+change belongs in this work. A necessary dependency/native-mechanism change
+must be resolved explicitly at the privacy/generation decision gate rather
+than concealed by the initial "no new dependency" scope assumption.
+
+## Repository and PR verification
+
+Run these gates from a clean worktree using the Go version in `go.mod`, with
+tmux installed; skipped tmux-dependent tests are not a pass for live coverage:
 
 ```bash
 go build ./...
@@ -250,45 +388,70 @@ gofmt -l .
 go vet ./...
 ```
 
-Also cross-compile the production binary and focused test binary with
-`CGO_ENABLED=0` for `darwin/arm64` and `darwin/amd64`. On a Mac, run the full
-`internal/sysstat` test binary and the isolated live application procedure.
+Cross-compile the production binary and focused test binary with
+`CGO_ENABLED=0` for `darwin/arm64`, `darwin/amd64`, `linux/arm64`, and
+`linux/amd64`; retain commands and outputs for each. Run the complete sysstat
+suite and focused consumer tests on Darwin, then the isolated live procedure.
+No timing threshold belongs in the regular test suite. Recheck dependency
+integrity and sensitive-output handling after the final adapter changes.
 
-The work is release-ready only when formatting prints nothing, build and vet
-are clean, the race suite passes, both Darwin architectures compile, target
-tests pass, and every untested runtime is named in the pull request.
+The PR must fill Scope with required behavior, the chosen identity mechanisms,
+explicit non-goals, every tested matrix value, and each gap plus the work needed
+to close it. Lead with removal of Darwin's expensive child-name process launch;
+state that the metrics pass remains `ps` and Linux/WSL2 retain their existing
+identity implementation. Link the benchmark and claim-to-artifact matrix, with
+source revisions, rather than presenting narrative claims as test results.
 
-## Risks and mitigations
+Complete the template's Visual evidence section. Retain sanitized before/after
+frames when showing session identity/status behavior; explain any unavailable
+before state. The syscall/performance mechanism itself may have no meaningful
+visual difference, in which case give that explicit applicability explanation
+and link traces/timings. A missing visual artifact cannot be treated as proof
+that a live frame was inspected.
 
-| Risk | Mitigation | Residual limitation |
-|---|---|---|
-| Child exits or PID is reused between samples | Query and validate the observed parent before retaining `argv[0]`; fail closed on every lookup error | Process sampling is not atomic; the next poll corrects transient identity loss |
-| Native query is denied | Omit only that child's identity; keep metrics and liveness from the first pass | Relaunch detection waits for a later successful sample |
-| Darwin behavior changes in gopsutil | Use its existing public process API and pinned module version; keep the adapter private and small | A future dependency update still requires Darwin tests |
-| Linux behavior drifts during extraction | Isolate it in a Linux file and lock the existing parser with tests | WSL2 runtime confidence still depends on host availability |
-| Timing tests become flaky | Keep performance measurements out of ordinary CI and test the absence of the process launch structurally | Release notes should quote the measured host and OS, not promise a universal latency |
-| The affected macOS release differs from the available host | Test the reporter's host when possible and preserve the limitation in evidence | Current target proves the discontinuity and solution, not the original 135 ms absolute value |
-| A fallback silently restores load | Do not implement one; surface persistent native failures through tests and issue reports | Emergency rollback is a code revert, not an automatic runtime switch |
+## Rollout and recovery
 
-## Rollout and rollback
+Status: recovery patch not prepared; release remains blocked.
 
-Ship the change without a feature flag. The behavior is internal, has no data
-migration, and fails by temporarily withholding optional identity rather than
-breaking metrics or session liveness.
+Ship without a feature flag only after the blocking gates pass. Monitor issue
+reports for missed or incorrect Darwin relaunch detection using sanitized
+reproducers and state assertions; never add command-line or environment logging
+as telemetry. A native failure may withhold a complete root identity only after
+the consumer-state preservation contract is implemented and verified.
 
-After release, watch issue reports for incorrect tool relaunch detection or
-missing child identities on Darwin. Do not add command-line logging to the
-poller as telemetry; arguments can contain sensitive user data.
+Before release, prepare a reviewed Darwin-only recovery patch using the scoped
+`ps -xo pid=,ppid=,args= -p ...` form. Record its source/base revision, application
+instructions, reproducible build and checksum. Validate PID/row selection,
+exit/error behavior, bounded latency, and root/consumer-state preservation on
+Darwin; verify Linux's command remains unchanged. Test and disclose any identity
+limitations of the recovery parser, including paths with spaces and ambiguous
+commands, withholding unsafe identity rather than accepting a false tool name.
+Run the same isolated trace and cleanup checks on the recovery build.
 
-If a Darwin regression appears, revert the native child-identity commit. A
-Darwin-only `ps -x` variant is an acceptable short-lived emergency patch
-because it avoids the known slow path there, but it must not be applied to
-Linux and must not become a silent fallback in the native implementation.
+For a native regression, the operational recovery is this verified patch/build,
+not a bare revert that restores the known pathological scoped command. It is an
+explicit short-lived replacement, never an automatic runtime fallback. Revert
+alone reinstates the reported performance risk and is not the default procedure.
+
+Neither a recovery build nor a later good poll automatically restores a cleared
+conversation ID or removed hook state. The recovery runbook must state that
+limitation and provide a supported, non-destructive recovery path if metadata
+was already changed; do not promise to reconstruct unknown prior state. Test
+recovery with disposable session metadata and verify that applying it causes
+no further loss. Prevention of that loss remains the primary release gate.
 
 ## Definition of done
 
-The feature is done when all acceptance criteria pass, the affected-host and
-platform confidence results are either recorded or explicitly scoped out, the
-pull request describes the narrow Darwin-only behavior accurately, and review
-finds no unrelated product or polling changes. Opening that pull request is a
-separate authorized action.
+The feature is release-ready only when all blocking criteria pass on the final
+revision, the design decisions are recorded, repository and architecture checks
+are clean, live claims have reproducible artifacts, and the recovery build is
+verified. Each tool/platform/terminal confidence gap must be closed or explicitly
+named with its required follow-up and accepted as part of the PR scope. Missing
+safety tests, privacy proof, or consumer-state preservation are not confidence
+gaps that can be scoped out.
+
+Final review must confirm the narrow platform boundary and no unrelated product
+or scheduling changes, reconcile historical documentation with the final result,
+and complete the PR's Scope and Visual evidence sections. Opening a PR, sending
+requests to the issue participants, merging, and releasing remain separately
+authorized actions. This document revision performs none of them.
