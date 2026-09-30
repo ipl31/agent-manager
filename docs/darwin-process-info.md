@@ -1,7 +1,10 @@
 # Darwin-native child process identity
 
-Status: proposed architecture for
+Status: implemented and target-validated on the feature branch for
 [#530](https://github.com/YoanWai/agent-manager/issues/530).
+
+Raw measurements and the bounded reproduction harness are in
+[`research/darwin-process-info`](research/darwin-process-info/README.md).
 
 ## Decision
 
@@ -22,9 +25,9 @@ process tree. A native replacement for that pass must first define equivalent
 first-sample CPU semantics and prove its full-table cost on Intel and Apple
 Silicon Macs.
 
-## Current path
+## Problem path
 
-`sysstat.Trees` currently performs two process launches per sample:
+Before this change, `sysstat.Trees` performed two process launches per sample:
 
 1. One machine-wide `ps` pass supplies PID, parent PID, CPU, RSS, and
    cumulative CPU time. `Trees` builds the child graph and sums each requested
@@ -112,7 +115,9 @@ machine-wide sample and the identity lookup.
 
 For each candidate, the Darwin implementation:
 
-1. Opens a `gopsutil/process.Process` for the candidate PID.
+1. Constructs a lightweight `gopsutil/process.Process` handle for the
+   candidate PID. It deliberately avoids `NewProcess`, which performs
+   redundant existence and creation-time queries.
 2. Reads its parent PID through `Ppid`.
 3. Stops if the process disappeared, access was denied, or its parent no
    longer matches the sampled pane root.
@@ -133,6 +138,22 @@ preserves an executable path containing spaces.
 
 No Darwin fallback starts `ps`. Falling back on the slow command would make
 the original failure return under load and would hide native lookup defects.
+
+## Alternatives considered
+
+| Option | Evidence | Decision |
+|---|---|---|
+| Add Darwin-only `-x` | Cuts the two-PID median on the target from 3.705 ms to 1.743 ms, but Linux `-x` widens selection to every process | Useful emergency patch, not the final design |
+| Native lookup for known children | 0.032 ms for two children and 0.080 ms for five; 47-115x faster than the current call | Implemented |
+| Skip an overlapping poll | `poller.run` calls `refreshOnce` synchronously, then waits on its ticker or poke channel; two passes from one manager cannot overlap | Does not address this cause |
+| One watcher for all managers | Could eliminate duplicate full polls but introduces ownership, failure recovery, freshness, and schema work across processes | Separate feature; unnecessary for this fix |
+| Back off when no client is attached | Would reduce unattended cost but changes status, inbox, and notification freshness | Separate product decision |
+
+The target runs macOS 15.5 rather than the macOS 26.5.1 version that produced
+the issue's approximately 135 ms measurement. It reproduces the same shape—a
+step in cost from one PID to two—and proves the native path independently of
+the size of the operating-system regression. Full results and limitations are
+recorded with the raw data.
 
 ## Consistency and failures
 
@@ -176,7 +197,7 @@ measured reuse rather than precede it.
 
 ## Verification
 
-Unit coverage should keep platform mechanics separate from shared policy.
+Unit coverage keeps platform mechanics separate from shared policy.
 
 Shared tests:
 
@@ -197,8 +218,8 @@ Darwin tests and checks:
 - confirm a child that exits during lookup is skipped without failing the
   sample;
 - compile with `CGO_ENABLED=0` for both `darwin/amd64` and `darwin/arm64`;
-- benchmark one, two, and approximately twenty direct children against the
-  current scoped `ps` implementation;
+- benchmark one, two, and five direct children against the current scoped
+  `ps` implementation and the Darwin-only `-x` alternative;
 - run the built manager on an isolated tmux socket with a throwaway home,
   launch real agent sessions, capture the TUI frame, and verify process stats,
   liveness, and relaunch detection;

@@ -1,0 +1,87 @@
+=== RUN   TestParseDarwinBattery
+--- PASS: TestParseDarwinBattery (0.00s)
+=== RUN   TestSampleBatteryDischarging
+--- PASS: TestSampleBatteryDischarging (0.00s)
+=== RUN   TestSampleBatteryCharging
+--- PASS: TestSampleBatteryCharging (0.00s)
+=== RUN   TestSampleBatteryMultiple
+--- PASS: TestSampleBatteryMultiple (0.00s)
+=== RUN   TestSampleBatteryNotFound
+--- PASS: TestSampleBatteryNotFound (0.00s)
+=== RUN   TestSampleBatteryEmptySlice
+--- PASS: TestSampleBatteryEmptySlice (0.00s)
+=== RUN   TestSampleBatteryReadError
+--- PASS: TestSampleBatteryReadError (0.00s)
+=== RUN   TestSampleBatteryPartialResultWithError
+--- PASS: TestSampleBatteryPartialResultWithError (0.00s)
+=== RUN   TestSampleBatterySkipsUnreadableEntries
+--- PASS: TestSampleBatterySkipsUnreadableEntries (0.00s)
+=== RUN   TestSampleBatteryKeepsLaptopBesideMouse
+--- PASS: TestSampleBatteryKeepsLaptopBesideMouse (0.00s)
+=== RUN   TestSampleBatteryDropsUnreadableCharge
+--- PASS: TestSampleBatteryDropsUnreadableCharge (0.00s)
+=== RUN   TestLookupChildNamesPreservesArgvZero
+--- PASS: TestLookupChildNamesPreservesArgvZero (0.00s)
+=== RUN   TestLookupChildNamesRejectsWrongParent
+--- PASS: TestLookupChildNamesRejectsWrongParent (0.00s)
+=== RUN   TestLookupChildNamesSkipsExitedChild
+--- PASS: TestLookupChildNamesSkipsExitedChild (0.01s)
+=== RUN   TestSample
+--- PASS: TestSample (0.27s)
+=== RUN   TestSensorCategories
+--- PASS: TestSensorCategories (0.00s)
+=== RUN   TestClassifyTemps
+=== RUN   TestClassifyTemps/apple_silicon_dies_fold_into_one_soc_reading
+=== RUN   TestClassifyTemps/intel_mac_smc_keys_split_cpu_and_gpu
+=== RUN   TestClassifyTemps/intel_linux_keeps_the_package_over_its_cores
+=== RUN   TestClassifyTemps/amd_names_the_cpu_tctl_and_the_gpu_amdgpu
+=== RUN   TestClassifyTemps/zenpower_tdie_is_a_cpu,_not_a_bare_die
+=== RUN   TestClassifyTemps/thermal_zones_name_the_chip_by_type
+=== RUN   TestClassifyTemps/an_soc_thermal_zone_alone_reads_as_the_soc
+=== RUN   TestClassifyTemps/zeroed_and_unknown_sensors_report_nothing
+=== RUN   TestClassifyTemps/a_sensor_reporting_its_own_absence_is_not_a_reading
+=== RUN   TestClassifyTemps/a_live_sensor_outlives_its_broken_neighbours
+=== RUN   TestClassifyTemps/no_sensors_at_all
+--- PASS: TestClassifyTemps (0.00s)
+    --- PASS: TestClassifyTemps/apple_silicon_dies_fold_into_one_soc_reading (0.00s)
+    --- PASS: TestClassifyTemps/intel_mac_smc_keys_split_cpu_and_gpu (0.00s)
+    --- PASS: TestClassifyTemps/intel_linux_keeps_the_package_over_its_cores (0.00s)
+    --- PASS: TestClassifyTemps/amd_names_the_cpu_tctl_and_the_gpu_amdgpu (0.00s)
+    --- PASS: TestClassifyTemps/zenpower_tdie_is_a_cpu,_not_a_bare_die (0.00s)
+    --- PASS: TestClassifyTemps/thermal_zones_name_the_chip_by_type (0.00s)
+    --- PASS: TestClassifyTemps/an_soc_thermal_zone_alone_reads_as_the_soc (0.00s)
+    --- PASS: TestClassifyTemps/zeroed_and_unknown_sensors_report_nothing (0.00s)
+    --- PASS: TestClassifyTemps/a_sensor_reporting_its_own_absence_is_not_a_reading (0.00s)
+    --- PASS: TestClassifyTemps/a_live_sensor_outlives_its_broken_neighbours (0.00s)
+    --- PASS: TestClassifyTemps/no_sensors_at_all (0.00s)
+=== RUN   TestTreesSelf
+--- PASS: TestTreesSelf (0.03s)
+=== RUN   TestTreesInvalid
+--- PASS: TestTreesInvalid (0.02s)
+=== RUN   TestCountNetInterface
+--- PASS: TestCountNetInterface (0.00s)
+=== RUN   TestUsedPercent
+--- PASS: TestUsedPercent (0.00s)
+=== RUN   TestParseVMStatMemoryUsed
+--- PASS: TestParseVMStatMemoryUsed (0.00s)
+=== RUN   TestParseVMStatMemoryUsedLegacyWithoutFileBacked
+--- PASS: TestParseVMStatMemoryUsedLegacyWithoutFileBacked (0.00s)
+=== RUN   TestSampleMemoryMatchesVMStatOnDarwin
+--- PASS: TestSampleMemoryMatchesVMStatOnDarwin (0.01s)
+=== RUN   TestHostCPUPercent
+--- PASS: TestHostCPUPercent (0.00s)
+=== RUN   TestHostRAMPercent
+--- PASS: TestHostRAMPercent (0.00s)
+=== RUN   TestHostCPUFromDelta
+--- PASS: TestHostCPUFromDelta (0.00s)
+=== RUN   TestParsePSTime
+--- PASS: TestParsePSTime (0.00s)
+=== RUN   TestScaleToHost
+--- PASS: TestScaleToHost (0.00s)
+=== RUN   TestLogicalCPUs
+--- PASS: TestLogicalCPUs (0.00s)
+=== RUN   TestTreesNamesDirectChildren
+--- PASS: TestTreesNamesDirectChildren (0.02s)
+=== RUN   TestChildNamesRequireTheSampledParent
+--- PASS: TestChildNamesRequireTheSampledParent (0.00s)
+PASS
