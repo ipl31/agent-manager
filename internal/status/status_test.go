@@ -1,6 +1,8 @@
 package status
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -2103,5 +2105,120 @@ func TestMusePromptAndReply(t *testing.T) {
 	picker := "  Resume a previous session\n❯ just now    blush-polaris · hello\n  1 / 3 · 34%  enter resume  esc exit"
 	if got := engine.TypingHold("muse", picker); got != Waiting {
 		t.Fatalf("picker TypingHold = %q", got)
+	}
+}
+
+// TestOpencodeFallbackFrames pins what the pane path reads from OpenCode
+// captures. On a wide pane the sidebar shares every row with the
+// transcript, so panel text leaks into prompts and quotes, shell output
+// can replace the prompt, and a footer with panel text after its
+// duration reads as no signal at all. These frames are the fixtures for
+// the server status source (#594), where the pane path stays as the
+// fallback; the fallback must be no worse than this.
+func TestOpencodeFallbackFrames(t *testing.T) {
+	engine := defaultEngine(t)
+	cases := []struct {
+		name, state     string
+		matched         bool
+		prompt          string
+		echoOK          bool
+		reply           string
+		anchored, msgOK bool
+	}{
+		{"after_interrupted", "working", true,
+			"so you can start immediately. ⠙ sleep 12; echo FOURTH-594-DONE Connect from 75+ providers to", true, "use other models, including",
+			false, true},
+		{"interrupted", "idle", false,
+			"<shell_metadata>                                                                                                      OpenCode includes free models User aborted the command                                                                                              so you can start immediately. </shell_metadata> Connect from 75+ providers to", true, "▣  Build · MiMo-V2.6-Flash Free · interrupted                                                                         Claude, GPT, Gemini etc",
+			false, true},
+		{"literal_square", "finished", true,
+			"Explain these symbols.", true, "□ Unselected entry",
+			false, true},
+		{"narrow_short", "finished", true,
+			"Reply with exactly: QUEUED-594-OK. Do not use tools.", true, "QUEUED-594-OK",
+			false, true},
+		{"queued", "idle", false,
+			"Reply with exactly: QUEUED-594-OK. Do not use tools.                                                                ⬖ Getting started                ✕", true, "▣  Build · MiMo-V2.6-Flash Free · 2.8s                                                                                Claude, GPT, Gemini etc",
+			false, true},
+		{"second_finished", "idle", false,
+			"SECOND-594-DONE", true, "Claude, GPT, Gemini etc",
+			false, true},
+		{"second_submitted", "working", true,
+			"LSP Run the shell command `sleep 12; echo SECOND-594-DONE` in the foreground, wait for it to finish, then reply       LSPs are disabled with one short sentence. Do not run any other commands.", true, "Claude, GPT, Gemini etc",
+			false, true},
+		{"second_tool", "working", true,
+			"⠦ sleep 12; echo SECOND-594-DONE", true, "Claude, GPT, Gemini etc",
+			false, true},
+		{"shell_workdir", "finished", true,
+			"PASS", true, "Tests passed.",
+			false, true},
+		{"sidebar_hidden", "finished", true,
+			"Reply with exactly: QUEUED-594-OK. Do not use tools.", true, "QUEUED-594-OK",
+			false, true},
+		{"unicode", "idle", false,
+			"Reply with exactly one line: 日本語 👩‍💻   café — UNICODE-594-OK. Do not use tools.                                   ⬖ Getting started                ✕", true, "▣  Build · MiMo-V2.6-Flash Free · 2.9s                                                                                Claude, GPT, Gemini etc",
+			false, true},
+		{"wide_after2", "finished", true,
+			"$ sleep 2; echo second-done                                                                              MCP • agent-manager Connected second-done LSP", true, "The command finished and printed second-done.",
+			false, true},
+		{"wide_during", "working", true,
+			"New session - 2026-09-27T16:56:48. Run the shell command \\`sleep 2; echo second-done\\` in the foreground and wait for it to finish,         056Z then reply with one short sentence. Context", true, "LSPs are disabled",
+			false, true},
+		{"wide_short", "idle", false,
+			"Reply with exactly: QUEUED-594-OK. Do not use tools. Conversation acknowledgment check", true, "Connect from 75+ providers to",
+			false, true},
+		{"wrapped_footer", "errored", true,
+			"Current prompt", true, "display name · 1.0s",
+			false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := os.ReadFile(filepath.Join("testdata", "opencode_"+tc.name+".txt"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			pane := engine.Plain("opencode", string(raw))
+			if got, matched := engine.Match("opencode", pane); got != tc.state || matched != tc.matched {
+				t.Fatalf("Match = %q matched=%v; want %q matched=%v", got, matched, tc.state, tc.matched)
+			}
+			if got, ok := engine.LastUserEcho("opencode", pane); ok != tc.echoOK || got != tc.prompt {
+				t.Fatalf("LastUserEcho = %q ok=%v; want %q ok=%v", got, ok, tc.prompt, tc.echoOK)
+			}
+			if got, anchored, ok := engine.LastMessage("opencode", pane); ok != tc.msgOK || anchored != tc.anchored || got != tc.reply {
+				t.Fatalf("LastMessage = %q anchored=%v ok=%v; want %q", got, anchored, ok, tc.reply)
+			}
+		})
+	}
+}
+
+// A prompt the tool wraps across gutter rows reads back whole; a blank
+// gutter row still separates the prompt from the tool output below it.
+func TestEchoedTextJoinsWrappedRows(t *testing.T) {
+	engine := defaultEngine(t)
+	pane := "  ┃\n" +
+		"  ┃  First half of the prompt\n" +
+		"  ┃  second half of the prompt\n" +
+		"  ┃\n" +
+		"     A reply.\n" +
+		"     ▣  Build · Test · 1s\n" +
+		"  ┃\n" +
+		"  ┃  Build · Test\n" +
+		"  ╹▀▀▀▀"
+	if got, ok := engine.LastUserEcho("opencode", pane); !ok || got != "First half of the prompt second half of the prompt" {
+		t.Fatalf("wrapped echo = %q ok=%v", got, ok)
+	}
+	tool := "  ┃\n" +
+		"  ┃  Run the tests.\n" +
+		"  ┃\n" +
+		"  ┃  $ go test ./...\n" +
+		"  ┃\n" +
+		"  ┃  PASS\n" +
+		"  ┃\n" +
+		"     Tests passed.\n" +
+		"     ▣  Build · Test · 1s\n" +
+		"  ┃\n" +
+		"  ╹▀▀▀▀"
+	if got, ok := engine.LastUserEcho("opencode", tool); !ok || got != "PASS" {
+		t.Fatalf("tool block echo = %q ok=%v; want the known fallback misread pinned, not fixed", got, ok)
 	}
 }

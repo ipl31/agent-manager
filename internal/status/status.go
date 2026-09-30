@@ -789,9 +789,44 @@ func (e *Engine) LastUserEcho(tool, pane string) (string, bool) {
 	if i < 0 {
 		return "", true
 	}
-	line := strings.TrimRight(lines[i], " \t")
-	loc := tr.userEcho.FindStringIndex(line)
-	return strings.TrimSpace(line[loc[1]:]), true
+	return tr.echoedText(lines, i), true
+}
+
+// echoedText returns the full echoed prompt containing start, joining the
+// contiguous wrapped echo rows around it. lastEchoIndex lands on the
+// block's last row; walking back to its first row is what assembles a
+// prompt the tool wrapped across gutter rows.
+func (tr toolRules) echoedText(lines []string, start int) string {
+	valid := func(line string) (string, bool) {
+		line = strings.TrimRight(line, " \t")
+		loc := tr.userEcho.FindStringIndex(line)
+		if loc == nil {
+			return "", false
+		}
+		if tr.matchesAnyRule(line) {
+			return "", false
+		}
+		echoed := strings.TrimSpace(line[loc[1]:])
+		if echoed == "" || (tr.placeholder != nil && tr.placeholder.MatchString(echoed)) {
+			return "", false
+		}
+		return echoed, true
+	}
+	for start > 0 {
+		if _, ok := valid(lines[start-1]); !ok {
+			break
+		}
+		start--
+	}
+	var parts []string
+	for i := start; i < len(lines); i++ {
+		echoed, ok := valid(lines[i])
+		if !ok {
+			break
+		}
+		parts = append(parts, echoed)
+	}
+	return strings.Join(parts, " ")
 }
 
 // lastEchoIndex is the row carrying the newest prompt the tool echoed, or
