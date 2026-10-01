@@ -667,6 +667,33 @@ func defaultEngine(t *testing.T, m *Model) {
 	m.poller.engine = engine
 }
 
+func TestGeminiRowQuotesLiveApproval(t *testing.T) {
+	cfg, err := config.Default()
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine, err := status.NewEngine(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver, err := tmux.NewWithSocket("amquote-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &poller{engine: engine, tmux: driver}
+	pane := " > Run a shell command.\n✦ Tea, good choice.\n" +
+		"╭──────────────────────────╮\n" +
+		"│ Run shell command        │\n" +
+		"│ sleep 15; echo done      │\n" +
+		"│ ● 1. Allow once          │\n" +
+		"│   2. Deny                │\n" +
+		"╰──────────────────────────╯\n⡏ Waiting for user confirmation..."
+	quote, prompt := p.rowLines(store.Session{Tool: "gemini"}, pane, "")
+	if quote != "sleep 15; echo done" || prompt != "" {
+		t.Fatalf("row lines = (%q, %q)", quote, prompt)
+	}
+}
+
 func TestQuietPaneAfterWorkingDerivesFinished(t *testing.T) {
 	disableQuietEndGrace(t)
 	m := buildModel(t)

@@ -1491,6 +1491,139 @@ func TestCommandCodeRowShapes(t *testing.T) {
 	}
 }
 
+func TestGeminiQuoteSkipsQueueAndReadsActiveApproval(t *testing.T) {
+	engine := defaultEngine(t)
+	queued := " > Write about terminal multiplexers.\n✦ Terminal multiplexers keep sessions open.\n" +
+		"Queued (press ↑ to edit):\n  Also, after that finishes, explain tmux\n" +
+		"  in one plain sentence.\n\n >   Type your message or @path/to/file"
+	if line, _, ok := engine.LastMessage("gemini", queued); !ok || line != "Terminal multiplexers keep sessions open." {
+		t.Fatalf("queued quote = %q ok=%v", line, ok)
+	}
+	beforeReply := " > Write about terminal multiplexers.\n" +
+		"Queued (press ↑ to edit):\n  Also explain tmux.\n\n >   Type your message or @path/to/file"
+	if line, _, ok := engine.LastMessage("gemini", beforeReply); !ok || line != "" {
+		t.Fatalf("queued before reply quote = %q ok=%v", line, ok)
+	}
+	box := "╭──────────────────────────────────────╮\n" +
+		"│ Run shell command                    │\n" +
+		"│ sleep 15; echo second-done           │\n" +
+		"│ ● 1. Allow once                      │\n" +
+		"│   2. Allow always                    │\n" +
+		"│   3. No, suggest changes (esc)       │\n" +
+		"╰──────────────────────────────────────╯\n⡏ Waiting for user confirmation..."
+	for _, pane := range []string{box, "✦ Tea, good choice.\n" + box} {
+		if line, anchored, ok := engine.LastMessage("gemini", pane); !ok || !anchored || line != "sleep 15; echo second-done" {
+			t.Fatalf("approval quote = %q anchored=%v ok=%v", line, anchored, ok)
+		}
+	}
+	moved := strings.Replace(box, "│ ● 1. Allow once", "│   1. Allow once", 1)
+	moved = strings.Replace(moved, "│   2. Allow always", "│ ● 2. Allow always", 1)
+	if line, _, ok := engine.LastMessage("gemini", moved); !ok || line != "sleep 15; echo second-done" {
+		t.Fatalf("moved selection quote = %q ok=%v", line, ok)
+	}
+	closed := box + "\n✦ The command finished.\n >   Type your message or @path/to/file"
+	if line, _, ok := engine.LastMessage("gemini", closed); !ok || line != "The command finished." {
+		t.Fatalf("closed dialog quote = %q ok=%v", line, ok)
+	}
+	// Gemini 0.62.0 also draws its first-run choice as a composerless box.
+	login := "╭────────────────────────╮\n" +
+		"│ ? Get started          │\n" +
+		"│ How would you like to authenticate for this project? │\n" +
+		"│ ● 1. Sign in with Google │\n" +
+		"│   2. Use Gemini API Key │\n" +
+		"│ (Use Enter to select) │\n" +
+		"╰────────────────────────╯"
+	if line, _, ok := engine.LastMessage("gemini", login); !ok || line != "How would you like to authenticate for this project?" {
+		t.Fatalf("first-run dialog quote = %q ok=%v", line, ok)
+	}
+	trust := " ╭──────────────────────────────────╮\n" +
+		" │                                    │\n" +
+		" │ Do you trust the files in this folder? │\n" +
+		" │                                    │\n" +
+		" │ Trusting a folder allows Gemini CLI to load its local configurations, │\n" +
+		" │ hooks, MCP servers, agent skills, and settings. │\n" +
+		" │                                    │\n" +
+		" │ ● 1. Trust folder (issue-590-gemini) │\n" +
+		" │   2. Don't trust                  │\n" +
+		" ╰──────────────────────────────────╯\n\n"
+	if line, _, ok := engine.LastMessage("gemini", trust); !ok || line != "Do you trust the files in this folder?" {
+		t.Fatalf("indented trust dialog quote = %q ok=%v", line, ok)
+	}
+	approval := "✦ I will create the file.\n" +
+		"╭──────────────────────────────────╮\n" +
+		"│ ? Shell  printf 'ready' > /tmp/check │\n" +
+		"│ ╭──────────────────────────────╮ │\n" +
+		"│ │ printf 'ready' > /tmp/check   │ │\n" +
+		"│ ╰──────────────────────────────╯ │\n" +
+		"│ Allow execution of [Shell]?      │\n" +
+		"│ Redirection detected.            │\n" +
+		"│ ● 1. Allow once                  │\n" +
+		"│   2. Allow for this session      │\n" +
+		"╰──────────────────────────────────╯"
+	if line, _, ok := engine.LastMessage("gemini", approval); !ok || line != "Allow execution of [Shell]?" {
+		t.Fatalf("nested shell approval quote = %q ok=%v", line, ok)
+	}
+}
+
+func TestGeminiQuoteNarrowAndExpandedDialogs(t *testing.T) {
+	engine := defaultEngine(t)
+	narrowTrust := " ╭──────────────────────────╮\n" +
+		" │ Do you trust the files   │\n" +
+		" │ in this folder?          │\n" +
+		" │                          │\n" +
+		" │ Trusting a folder allows │\n" +
+		" │ Gemini CLI to load its   │\n" +
+		" │ local configurations.    │\n" +
+		" │ ● 1. Trust folder        │\n" +
+		" │   2. Don't trust         │\n" +
+		" ╰──────────────────────────╯\n"
+	if line, _, ok := engine.LastMessage("gemini", narrowTrust); !ok || line != "Do you trust the files in this folder?" {
+		t.Errorf("narrow trust quote = %q ok=%v", line, ok)
+	}
+	approval := "╭────────────────────────────────╮\n" +
+		"│ ? Shell  echo ready            │\n" +
+		"│ ╭────────────────────────────╮ │\n" +
+		"│ │ echo ready                 │ │\n" +
+		"│ ╰────────────────────────────╯ │\n" +
+		"│ 1. A numbered note precedes the choices │\n" +
+		"│ Allow execution of [Shell]?    │\n" +
+		"│ ● 1. Allow once                │\n" +
+		"│   2. Deny                     │\n" +
+		"╰────────────────────────────────╯"
+	for _, summary := range []string{"8 skills", "1 skill", "1 GEMINI.md file · 8 skills", "1 MCP server · 8 skills"} {
+		expanded := approval + "\n\n  Queued (press ↑ to edit):\n    Follow-up request\n\n" +
+			" ⠏ Waiting for user confirmation...\n" +
+			"────────────────────────────────\n Shift+Tab to accept edits\n  " + summary + "\n" +
+			"────────────────────────────────\n >   Type your message or @path/to/file\n" +
+			" workspace (/directory)"
+		if line, _, ok := engine.LastMessage("gemini", expanded); !ok || line != "Allow execution of [Shell]?" {
+			t.Errorf("expanded approval with %q quote = %q ok=%v", summary, line, ok)
+		}
+	}
+	if line, _, ok := engine.LastMessage("gemini", approval+"\n⠏ Waiting for user confirmation..."); !ok || line != "Allow execution of [Shell]?" {
+		t.Errorf("waiting glyph approval quote = %q ok=%v", line, ok)
+	}
+	stale := approval + "\n✦ The command finished.\n >   Type your message or @path/to/file"
+	if line, _, ok := engine.LastMessage("gemini", stale); !ok || line != "The command finished." {
+		t.Errorf("stale approval quote = %q ok=%v", line, ok)
+	}
+	framedStale := approval + "\n────────────────────────────────\n✦ A newer answer.\n >   Type your message or @path/to/file"
+	if line, _, ok := engine.LastMessage("gemini", framedStale); !ok || line != "A newer answer." {
+		t.Errorf("stale approval after frame quote = %q ok=%v", line, ok)
+	}
+}
+
+func TestGeminiQuoteSkipsNarrowQueuedHeader(t *testing.T) {
+	engine := defaultEngine(t)
+	for _, header := range []string{"  Queued (press ↑ to\n  edit):", "  Queued\n  (press ↑ to edit):"} {
+		pane := " > Explain tmux.\n✦ A multiplexer keeps sessions open.\n" + header + "\n" +
+			"    A queued follow-up…\n    ... (+2 more)\n\n >   Type your message or @path/to/file"
+		if line, _, ok := engine.LastMessage("gemini", pane); !ok || line != "A multiplexer keeps sessions open." {
+			t.Errorf("header %q quote = %q ok=%v", header, line, ok)
+		}
+	}
+}
+
 func TestGrokLastMessageSkipsChrome(t *testing.T) {
 	engine := defaultEngine(t)
 

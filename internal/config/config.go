@@ -104,6 +104,10 @@ type Tool struct {
 	// for its selected option from a draft typed at a resting composer, so
 	// the rows below the marker join what the rules read.
 	DialogFooter string `toml:"dialog_footer"`
+	// DialogBox captures a modal's bordered rows. Status detection checks
+	// whether the box is still live before quoting its question.
+	DialogBox    string `toml:"dialog_box"`
+	DialogOption string `toml:"dialog_option"`
 	// BusyFooter is a line the tool draws under its activity cutoff only
 	// while a turn runs. A working rule that matches without it belongs to
 	// a turn that died before printing its end marker, which is errored.
@@ -602,6 +606,11 @@ message_start = "^\\s*✦ "
 input_placeholder = "^Type your message or @path/to/file"
 # a submitted prompt echoes into the transcript on its own "> " line
 user_echo = "^\\s*> "
+# Queued input is drawn as a block under the current reply and may wrap.
+chrome_block = "^\\s*Queued\\s*\\(press"
+# The approval box may replace the composer or sit above it.
+dialog_box = "(?m)╭─+╮\\n((?:[ \\t]*│[^\\n]*\\n)+)[ \\t]*╰─+╯"
+dialog_option = "^[ \\t]*(?:●[ \\t]*)?\\d+\\."
 rules = [
   # selected row of an approval/trust dialog, inside its bordered box:
   # "│ ● 1. Allow once"

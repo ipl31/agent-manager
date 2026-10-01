@@ -49,6 +49,8 @@ type toolRules struct {
 	placeholder    *regexp.Regexp
 	userEcho       *regexp.Regexp
 	dialogFooter   *regexp.Regexp
+	dialogBox      *regexp.Regexp
+	dialogOption   *regexp.Regexp
 	busyFooter     *regexp.Regexp
 	// composerPlaceholder is the literal text a tool paints inside its
 	// empty composer; a draft replaces it. Searched in a stripped row.
@@ -91,6 +93,8 @@ func NewEngine(cfg config.Config) (*Engine, error) {
 			{tool.InputPlaceholder, &tr.placeholder},
 			{tool.UserEcho, &tr.userEcho},
 			{tool.DialogFooter, &tr.dialogFooter},
+			{tool.DialogBox, &tr.dialogBox},
+			{tool.DialogOption, &tr.dialogOption},
 			{tool.BusyFooter, &tr.busyFooter},
 		}
 		for _, opt := range optional {
@@ -420,6 +424,9 @@ func (e *Engine) LastMessage(tool, pane string) (line string, anchored, ok bool)
 	if !ok {
 		return "", false, false
 	}
+	if question := tr.boxQuestion(pane); question != "" {
+		return question, true, true
+	}
 	region, ok := tr.activityRegion(pane)
 	if !ok {
 		return "", false, false
@@ -432,8 +439,20 @@ func (e *Engine) LastMessage(tool, pane string) (line string, anchored, ok bool)
 		}
 	}
 	start, lastContent := -1, -1
+	skipEcho := false
 	for i, raw := range lines {
 		line := strings.TrimRight(raw, " \t")
+		if tr.userEcho != nil && tr.messageStart != nil && tr.userEcho.MatchString(line) {
+			skipEcho = true
+			continue
+		}
+		if tr.messageStart != nil && tr.messageStart.MatchString(line) {
+			skipEcho = false
+		}
+		if skipEcho && (strings.TrimSpace(line) == "" || wrapsAbove(line)) {
+			continue
+		}
+		skipEcho = false
 		if strings.TrimSpace(line) == "" || inBlock[i] || tr.isStructural(line) {
 			continue
 		}
@@ -466,6 +485,91 @@ func (e *Engine) LastMessage(tool, pane string) (line string, anchored, ok bool)
 		parts = append(parts, strings.TrimSpace(line))
 	}
 	return strings.TrimSpace(strings.Join(parts, " ")), true, true
+}
+
+func (tr toolRules) boxQuestion(pane string) string {
+	if tr.dialogBox == nil || tr.dialogOption == nil {
+		return ""
+	}
+	matches := tr.dialogBox.FindAllStringSubmatchIndex(pane, -1)
+	if len(matches) == 0 {
+		return ""
+	}
+	match := matches[len(matches)-1]
+	body := pane[match[2]:match[3]]
+	if state, matched := tr.matchRules(body); !matched || state != Waiting || !tr.liveDialogTail(pane, match[1]) {
+		return ""
+	}
+	question, lastContent := "", ""
+	var paragraph []string
+	for _, raw := range strings.Split(body, "\n") {
+		row := strings.TrimSpace(raw)
+		row = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(row, "│"), "│"))
+		if row == "" || strings.HasPrefix(row, "╭") || strings.HasPrefix(row, "╰") || strings.HasPrefix(row, "│") {
+			paragraph = nil
+			continue
+		}
+		if tr.dialogOption.MatchString(row) {
+			paragraph = nil
+			if strings.HasPrefix(row, "●") {
+				if question != "" {
+					return question
+				}
+				return lastContent
+			}
+			continue
+		}
+		lastContent = row
+		if strings.HasPrefix(row, "? ") {
+			paragraph = nil
+			row = strings.TrimPrefix(row, "? ")
+			if !strings.HasSuffix(row, "?") {
+				continue
+			}
+		}
+		paragraph = append(paragraph, row)
+		if strings.HasSuffix(row, "?") {
+			question = strings.Join(paragraph, " ")
+			paragraph = nil
+		}
+	}
+	return ""
+}
+
+func (tr toolRules) liveDialogTail(pane string, end int) bool {
+	tailEnd := len(pane)
+	hasComposer := false
+	if tr.activityCutoff != nil {
+		cutoffs := tr.activityCutoff.FindAllStringIndex(pane[end:], -1)
+		if len(cutoffs) > 0 {
+			tailEnd = end + cutoffs[len(cutoffs)-1][0]
+			hasComposer = true
+		}
+	}
+	lines := strings.Split(pane[end:tailEnd], "\n")
+	inBlock := tr.chromeBlockRows(lines)
+	inFrame := false
+	for i, row := range lines {
+		trimmed := strings.TrimSpace(row)
+		if hasComposer && trimmed != "" && strings.Trim(trimmed, "─") == "" {
+			inFrame = true
+			continue
+		}
+		if inFrame {
+			if tr.messageStart != nil && tr.messageStart.MatchString(row) || tr.userEcho != nil && tr.userEcho.MatchString(row) {
+				return false
+			}
+			continue
+		}
+		if strings.TrimSpace(row) == "" || inBlock[i] || tr.isStructural(row) {
+			continue
+		}
+		if state, matched := tr.matchRules(row); matched && state == Waiting {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func (tr toolRules) dialogOpen(cutoffTail string) bool {
