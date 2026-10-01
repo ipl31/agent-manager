@@ -300,8 +300,15 @@ func (tr toolRules) matchScope(pane string) string {
 // marker row until a row opens a block of its own.
 func (tr toolRules) withoutInputRows(lines []string) string {
 	kept := make([]string, 0, len(lines))
+	inBlock := tr.chromeBlockRows(lines)
 	sent := false
-	for _, line := range lines {
+	keepBlock := false
+	for i, line := range lines {
+		// A queued block is chrome, but Claude's spinner owns a chrome block
+		// too and must remain visible to the working rules.
+		if inBlock[i] && (i == 0 || !inBlock[i-1]) {
+			keepBlock = tr.matchesWorkingRule(line)
+		}
 		if tr.inputRow(line) {
 			sent = true
 			continue
@@ -310,6 +317,9 @@ func (tr toolRules) withoutInputRows(lines []string) string {
 			continue
 		}
 		sent = false
+		if inBlock[i] && !keepBlock {
+			continue
+		}
 		kept = append(kept, line)
 	}
 	return strings.Join(kept, "\n")
@@ -886,7 +896,8 @@ func (e *Engine) InputDraft(tool, pane string) (string, bool) {
 // rather than say anything, so a caller quoting output steps over them.
 func (tr toolRules) matchesWorkingRule(line string) bool {
 	for _, r := range tr.rules {
-		if r.state == Working && r.re.MatchString(line) {
+		// Codex's pane rule includes the newline after its status row.
+		if r.state == Working && (r.re.MatchString(line) || r.re.MatchString(line+"\n")) {
 			return true
 		}
 	}
