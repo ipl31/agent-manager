@@ -51,6 +51,7 @@ func main() {
 	case "quick":
 		err = runGo(goBinary, "test", "./internal/status", "./internal/tmux", "./internal/ui", "./internal/agentsession", "./internal/sessioncmd", "-run", "^TestPaneCorpus$|^TestPasteKeepsBytesAndTargetsPaneZero$|^TestBracketedPasteKeepsBoundaries$|^TestFocusKeyCommand$|^TestMouseReportEncodings$|^TestFocusPasteKeepsPromptInComposer$|^TestPendingInputLandsOnAnErroredPane$|^TestCaptureAgentSessionIDs|^TestSnapshotRelaunch|^FuzzPane|^FuzzFocusPreviewTrace$|^FuzzPollerStatusTrace$|^FuzzFocusKeyBytes$|^FuzzSessionCandidates$|^FuzzOpencodeExportParser$")
 	case "fuzz":
+		var failures []string
 		for _, target := range []struct{ pkg, name string }{
 			{"./internal/status", "FuzzPaneDraftIsolation"},
 			{"./internal/status", "FuzzPaneRobustness"},
@@ -60,9 +61,12 @@ func main() {
 			{"./internal/agentsession", "FuzzSessionCandidates"},
 			{"./internal/agentsession", "FuzzOpencodeExportParser"},
 		} {
-			if err = runGo(goBinary, "test", target.pkg, "-run", "^$", "-fuzz", "^"+target.name+"$", "-fuzztime", fmt.Sprintf("%ds", seconds), "-parallel", "2"); err != nil {
-				break
+			if runErr := runGo(goBinary, "test", target.pkg, "-run", "^$", "-fuzz", "^"+target.name+"$", "-fuzztime", fmt.Sprintf("%ds", seconds), "-parallel", "2"); runErr != nil {
+				failures = append(failures, target.name+": "+runErr.Error())
 			}
+		}
+		if len(failures) != 0 {
+			err = errors.New(strings.Join(failures, "\n"))
 		}
 	case "live":
 		err = runLive(selected, output, currentHome)

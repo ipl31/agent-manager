@@ -47,3 +47,14 @@ snapshots, and OpenCode metadata parser stability. The tmux test verifies a
 paste longer than 1024 bytes lands intact in pane 0 while pane 1 is active,
 then checks that `SendText` submits only after the message bytes. Discovery
 time is explicit so it can be run often.
+
+## Known detections on this branch
+
+The standalone `am/tui-fuzzer` branch deliberately leaves production status
+code at its `origin/main` base (`87569e4`). `quick` currently fails on
+`codex-working-draft` and `codex-queued-followup`. The first
+`FuzzPaneDraftIsolation` seeds fail for the same reply bug. Those failures
+detect two Codex defects, not test setup failures. `fuzz` continues to the other targets and reports all
+failures at the end. The separate `fix/codex-queued-status-reply` branch carries
+the production changes and focused regressions. With both branches applied,
+the corpus and fuzz seeds pass.
