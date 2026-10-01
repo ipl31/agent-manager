@@ -616,6 +616,7 @@ func requireHeld(t *testing.T, done <-chan error, failure string) {
 
 // otherProcessEnv names the action a rerun of this test binary repeats.
 const otherProcessEnv = "AM_TMUX_TEST_OTHER_PROCESS"
+const otherProcessSocketEnv = "AM_TMUX_TEST_OTHER_SOCKET"
 
 // startOtherProcess runs this test binary again as another agent-manager
 // process that repeats action on the session until the test ends. It returns
@@ -623,7 +624,7 @@ const otherProcessEnv = "AM_TMUX_TEST_OTHER_PROCESS"
 func startOtherProcess(t *testing.T, driver *Driver, action, id string) <-chan error {
 	t.Helper()
 	other := exec.Command(os.Args[0], driver.bin, id)
-	other.Env = append(os.Environ(), otherProcessEnv+"="+action)
+	other.Env = append(os.Environ(), otherProcessEnv+"="+action, otherProcessSocketEnv+"="+driver.socket)
 	stdin, err := other.StdinPipe()
 	if err != nil {
 		t.Fatalf("other process stdin: %v", err)

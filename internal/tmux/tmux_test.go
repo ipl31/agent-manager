@@ -18,7 +18,7 @@ import (
 // testSocket is an isolated tmux server for this package's tests, so they
 // never touch the default socket where the user's shell tmux and live agents
 // live. TestMain tears it down before and after the run.
-const testSocket = "amtmuxtest"
+var testSocket = fmt.Sprintf("amt%x", os.Getpid())
 
 // TestMain kills any leftover test server so each run starts and ends clean.
 // The anchor session then holds the server up for the whole run: tests kill
@@ -29,7 +29,7 @@ func TestMain(m *testing.M) {
 	// startOtherProcess runs this binary again as a second agent-manager
 	// process, with the tmux binary and the session as its arguments.
 	if action := os.Getenv(otherProcessEnv); action != "" {
-		os.Exit(repeatUntilStdinCloses(&Driver{bin: os.Args[1], socket: testSocket}, action, os.Args[2]))
+		os.Exit(repeatUntilStdinCloses(&Driver{bin: os.Args[1], socket: os.Getenv(otherProcessSocketEnv)}, action, os.Args[2]))
 	}
 	// kill-server fails whenever no server is up, which is the normal case.
 	tmuxCmd("kill-server").Run()

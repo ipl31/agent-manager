@@ -12,7 +12,7 @@ import (
 // testSocket is an isolated tmux server for this package's tests, so they
 // never touch the default socket where the user's shell tmux and live agents
 // live. TestMain tears it down before and after the run.
-const testSocket = "amuitest"
+var testSocket = fmt.Sprintf("amui%x", os.Getpid())
 
 // TestMain kills any leftover test server so each run starts and ends clean.
 // The anchor session then holds the server up for the whole run: tests kill
