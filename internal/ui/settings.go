@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/YoanWai/agent-manager/internal/config"
 	"github.com/YoanWai/agent-manager/internal/store"
 	"github.com/YoanWai/agent-manager/internal/systheme"
 	tea "github.com/charmbracelet/bubbletea"
@@ -24,14 +25,7 @@ func (m *Model) defaultTool() string {
 		m.errBar.text = "reading default tool setting: " + err.Error()
 		return names[0]
 	}
-	if chosen != "" {
-		for _, name := range names {
-			if name == chosen {
-				return chosen
-			}
-		}
-	}
-	return names[0]
+	return config.DefaultAgentTool(names, chosen)
 }
 
 // hiddenTools returns the set of CLI names the user turned off for new sessions.
@@ -45,20 +39,7 @@ func (m *Model) hiddenTools() map[string]bool {
 }
 
 func parseHiddenTools(raw string) map[string]bool {
-	if raw == "" {
-		return nil
-	}
-	hidden := make(map[string]bool)
-	for _, part := range strings.Split(raw, ",") {
-		name := strings.TrimSpace(part)
-		if name != "" {
-			hidden[name] = true
-		}
-	}
-	if len(hidden) == 0 {
-		return nil
-	}
-	return hidden
+	return config.HiddenTools(raw)
 }
 
 func formatHiddenTools(hidden map[string]bool) string {

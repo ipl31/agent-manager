@@ -71,3 +71,13 @@ func TestTaskVerbsDispatch(t *testing.T) {
 		t.Fatalf("task delete output = %q", deleted.String())
 	}
 }
+
+func TestTaskClaimAsOverridesAmbientCaller(t *testing.T) {
+	fake := &fakeSessions{task: sessioncmd.Task{ID: "t1", Title: "ticket", State: "in_progress"}}
+	if err := runTaskClaim(&bytes.Buffer{}, fake, []string{"t1", "--as=beef1234"}, "cafe0001"); err != nil {
+		t.Fatal(err)
+	}
+	if fake.callerID != "beef1234" {
+		t.Fatalf("task claimant = %q", fake.callerID)
+	}
+}

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io"
 	"strings"
@@ -10,11 +11,11 @@ import (
 )
 
 const (
-	usageRename        = `rename "<name>"`
-	usageReviewRepo    = "review-repo <path>"
-	usageReviewBase    = "review-base <ref>|--clear"
-	usageReviewMode    = "review-mode <uncommitted|branch|last_commit|staged>"
-	usageReviewComment = "review-comment <comment-id> [--reopen]"
+	usageRename        = `rename "<name>" [--as <session-id>]`
+	usageReviewRepo    = "review-repo <path> [--as <session-id>]"
+	usageReviewBase    = "review-base <ref>|--clear [--as <session-id>]"
+	usageReviewMode    = "review-mode <uncommitted|branch|last_commit|staged> [--as <session-id>]"
+	usageReviewComment = "review-comment <comment-id> [--reopen] [--as <session-id>]"
 )
 
 func reviewSection() section {
@@ -32,7 +33,8 @@ func reviewSection() section {
 
 func runRename(out io.Writer, args []string, sessionID, configDir string) error {
 	set := newFlagSet(usageRename)
-	operands, err := parseCommand(out, set, args, 1, 1)
+	callerFlag(set, &sessionID)
+	operands, err := parseReviewCommand(out, set, args, 1, 1, sessionID, configDir)
 	if err != nil {
 		return err
 	}
@@ -46,7 +48,8 @@ func runRename(out io.Writer, args []string, sessionID, configDir string) error 
 
 func runReviewRepo(out io.Writer, args []string, sessionID, configDir string) error {
 	set := newFlagSet(usageReviewRepo)
-	operands, err := parseCommand(out, set, args, 1, 1)
+	callerFlag(set, &sessionID)
+	operands, err := parseReviewCommand(out, set, args, 1, 1, sessionID, configDir)
 	if err != nil {
 		return err
 	}
@@ -62,8 +65,9 @@ func runReviewRepo(out io.Writer, args []string, sessionID, configDir string) er
 // this from, which is how it names its own worktree without a flag.
 func runReviewBase(out io.Writer, args []string, sessionID, configDir string) error {
 	set := newFlagSet(usageReviewBase)
+	callerFlag(set, &sessionID)
 	clear := set.Bool("clear", false, "drop the declared ref and return to auto-detection")
-	operands, err := parseCommand(out, set, args, 0, 1)
+	operands, err := parseReviewCommand(out, set, args, 0, 1, sessionID, configDir)
 	if err != nil {
 		return err
 	}
@@ -82,7 +86,8 @@ func runReviewBase(out io.Writer, args []string, sessionID, configDir string) er
 
 func runReviewMode(out io.Writer, args []string, sessionID, configDir string) error {
 	set := newFlagSet(usageReviewMode)
-	operands, err := parseCommand(out, set, args, 1, 1)
+	callerFlag(set, &sessionID)
+	operands, err := parseReviewCommand(out, set, args, 1, 1, sessionID, configDir)
 	if err != nil {
 		return err
 	}
@@ -92,8 +97,9 @@ func runReviewMode(out io.Writer, args []string, sessionID, configDir string) er
 
 func runReviewComment(out io.Writer, args []string, sessionID, configDir string) error {
 	set := newFlagSet(usageReviewComment)
+	callerFlag(set, &sessionID)
 	reopen := set.Bool("reopen", false, "mark the comment open again")
-	operands, err := parseCommand(out, set, args, 1, 1)
+	operands, err := parseReviewCommand(out, set, args, 1, 1, sessionID, configDir)
 	if err != nil {
 		return err
 	}
@@ -116,4 +122,23 @@ func printMessage(out io.Writer, message string, err error) error {
 	}
 	_, err = fmt.Fprintln(out, message)
 	return err
+}
+
+func parseReviewCommand(out io.Writer, set *flag.FlagSet, args []string, min, max int, sessionID, configDir string) ([]string, error) {
+	operands, err := parseCommand(out, set, args, min, max)
+	if err != nil {
+		return nil, err
+	}
+	explicit := false
+	set.Visit(func(given *flag.Flag) {
+		if given.Name == "as" {
+			explicit = true
+		}
+	})
+	if explicit {
+		if err := sessioncmd.ValidateCaller(configDir, sessionID); err != nil {
+			return nil, err
+		}
+	}
+	return operands, nil
 }

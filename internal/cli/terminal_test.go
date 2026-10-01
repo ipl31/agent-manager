@@ -90,3 +90,13 @@ func TestMissingTerminalIDIsAUsageError(t *testing.T) {
 		})
 	}
 }
+
+func TestTerminalAsOverridesAmbientCaller(t *testing.T) {
+	fake := &fakeTerminals{}
+	if err := runTerminalList(&bytes.Buffer{}, fake, []string{"--as", "beef1234"}, "cafe0001"); err != nil {
+		t.Fatal(err)
+	}
+	if fake.callerID != "beef1234" {
+		t.Fatalf("terminal caller = %q", fake.callerID)
+	}
+}

@@ -9,11 +9,11 @@ import (
 )
 
 const (
-	usageTerminalList   = "terminal list [--json]"
-	usageTerminalCreate = "terminal create [--group <path>] [--directory <path>] [--nest=false] [--json]"
-	usageTerminalSend   = `terminal send <terminal-id> --command "<text>" | --keys <key,key> [--json]`
-	usageTerminalRead   = "terminal read <terminal-id> [--json]"
-	usageTerminalClose  = "terminal close <terminal-id>"
+	usageTerminalList   = "terminal list [--json] [--as <session-id>]"
+	usageTerminalCreate = "terminal create [--group <path>] [--directory <path>] [--nest=false] [--json] [--as <session-id>]"
+	usageTerminalSend   = `terminal send <terminal-id> --command "<text>" | --keys <key,key> [--json] [--as <session-id>]`
+	usageTerminalRead   = "terminal read <terminal-id> [--json] [--as <session-id>]"
+	usageTerminalClose  = "terminal close <terminal-id> [--as <session-id>]"
 )
 
 type terminalCommands interface {
@@ -44,6 +44,7 @@ func terminalSection() section {
 
 func runTerminalList(out io.Writer, terminals terminalCommands, args []string, sessionID string) error {
 	set := newFlagSet(usageTerminalList)
+	callerFlag(set, &sessionID)
 	asJSON := jsonFlag(set)
 	if _, err := parseCommand(out, set, args, 0, 0); err != nil {
 		return err
@@ -57,6 +58,7 @@ func runTerminalList(out io.Writer, terminals terminalCommands, args []string, s
 
 func runTerminalCreate(out io.Writer, terminals terminalCommands, args []string, sessionID string) error {
 	set := newFlagSet(usageTerminalCreate)
+	callerFlag(set, &sessionID)
 	group := set.String("group", "", "existing group path to open it in; pass an empty string for the root group")
 	directory := set.String("directory", "", "existing directory to open; defaults to yours, or to the group's inherited path")
 	nest := set.Bool("nest", true, "hang the terminal under this session; pass --nest=false to leave it loose or to open it in another group")
@@ -81,6 +83,7 @@ func runTerminalCreate(out io.Writer, terminals terminalCommands, args []string,
 
 func runTerminalSend(out io.Writer, terminals terminalCommands, args []string, sessionID string) error {
 	set := newFlagSet(usageTerminalSend)
+	callerFlag(set, &sessionID)
 	text := set.String("command", "", "command text to paste and submit with Enter, which executes on the user's machine")
 	var keys stringList
 	set.Var(&keys, "keys", "exact tmux key names to send in order, repeatable or comma separated, such as C-c or Up,Enter")
@@ -98,6 +101,7 @@ func runTerminalSend(out io.Writer, terminals terminalCommands, args []string, s
 
 func runTerminalRead(out io.Writer, terminals terminalCommands, args []string, sessionID string) error {
 	set := newFlagSet(usageTerminalRead)
+	callerFlag(set, &sessionID)
 	asJSON := jsonFlag(set)
 	operands, err := parseCommand(out, set, args, 1, 1)
 	if err != nil {
@@ -112,6 +116,7 @@ func runTerminalRead(out io.Writer, terminals terminalCommands, args []string, s
 
 func runTerminalClose(out io.Writer, terminals terminalCommands, args []string, sessionID string) error {
 	set := newFlagSet(usageTerminalClose)
+	callerFlag(set, &sessionID)
 	operands, err := parseCommand(out, set, args, 1, 1)
 	if err != nil {
 		return err

@@ -118,6 +118,13 @@ func (r *runtime) caller(sessionID string) (store.Session, error) {
 	return sess, err
 }
 
+func (r *runtime) optionalCaller(sessionID string) (store.Session, error) {
+	if sessionID == "" {
+		return store.Session{}, nil
+	}
+	return r.caller(sessionID)
+}
+
 func (r *runtime) terminal(id string) (store.Session, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -349,7 +356,8 @@ func ShellName(toolName, parentID, fallbackSuffix string, sessions []store.Sessi
 // A nil requested group inherits the caller's; an explicit one must
 // already exist. An explicit directory wins outright; a caller that named
 // a group falls back to that group's nearest inherited default path; a
-// caller that named none opens beside itself.
+// caller that named none opens beside itself. An external caller uses the
+// group's inherited directory, then its process working directory.
 func (r *runtime) createTarget(caller store.Session, requestedGroup *string, directory string) (string, string, error) {
 	group := caller.Group
 	groups, err := r.store.Groups()
@@ -377,7 +385,7 @@ func (r *runtime) createTarget(caller store.Session, requestedGroup *string, dir
 		dir, err := resolveTerminalDirectory(directory)
 		return group, dir, err
 	}
-	if requestedGroup != nil {
+	if requestedGroup != nil || caller.ID == "" {
 		for current := group; current != ""; current = parentGroup(current) {
 			if candidate := byName[current].Path; candidate != "" {
 				if dir, err := resolveTerminalDirectory(candidate); err == nil {
@@ -387,12 +395,17 @@ func (r *runtime) createTarget(caller store.Session, requestedGroup *string, dir
 		}
 	}
 	dir := caller.Cwd
-	if current, err := r.driver.PaneCurrentPath(caller.ID); err == nil {
+	if caller.ID == "" {
+		dir, err = os.Getwd()
+		if err != nil {
+			return "", "", err
+		}
+	} else if current, err := r.driver.PaneCurrentPath(caller.ID); err == nil {
 		dir = current
 	}
 	resolved, err := resolveTerminalDirectory(dir)
 	if err != nil {
-		return "", "", fmt.Errorf("no usable directory for terminal: %w", err)
+		return "", "", fmt.Errorf("no usable directory for new session: %w", err)
 	}
 	return group, resolved, nil
 }

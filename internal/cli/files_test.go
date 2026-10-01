@@ -79,3 +79,13 @@ func TestReservationsAndReleaseReadTheSameLeases(t *testing.T) {
 		t.Fatalf("release-files output = %q", released.String())
 	}
 }
+
+func TestReserveAsOverridesAmbientCaller(t *testing.T) {
+	fake := &fakeSessions{reserve: sessioncmd.ReserveResult{Reserved: []sessioncmd.Reservation{{Pattern: "internal/cli", Mode: "exclusive"}}}}
+	if err := runReserve(&bytes.Buffer{}, fake, []string{"internal/cli", "--as", "beef1234"}, "cafe0001"); err != nil {
+		t.Fatal(err)
+	}
+	if fake.callerID != "beef1234" {
+		t.Fatalf("reservation holder = %q", fake.callerID)
+	}
+}

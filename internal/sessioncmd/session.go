@@ -152,7 +152,7 @@ func (s *Sessions) List(sessionID string) ([]Session, error) {
 		return nil, err
 	}
 	defer runtime.store.Close()
-	if _, err := runtime.caller(sessionID); err != nil {
+	if _, err := runtime.optionalCaller(sessionID); err != nil {
 		return nil, err
 	}
 	stored, err := runtime.store.ListSessions(true)
@@ -180,7 +180,7 @@ func (s *Sessions) Groups(sessionID string) ([]Group, error) {
 		return nil, err
 	}
 	defer runtime.store.Close()
-	if _, err := runtime.caller(sessionID); err != nil {
+	if _, err := runtime.optionalCaller(sessionID); err != nil {
 		return nil, err
 	}
 	stored, err := runtime.store.Groups()
@@ -224,7 +224,7 @@ func (s *Sessions) CreateGroup(sessionID, path, directory string) (Group, error)
 		return Group{}, err
 	}
 	defer runtime.store.Close()
-	if _, err := runtime.caller(sessionID); err != nil {
+	if _, err := runtime.optionalCaller(sessionID); err != nil {
 		return Group{}, err
 	}
 	existing, err := runtime.store.Groups()
@@ -282,7 +282,7 @@ func (s *Sessions) DeleteGroup(sessionID, path string) (GroupRemoval, error) {
 		return GroupRemoval{}, err
 	}
 	defer runtime.store.Close()
-	if _, err := runtime.caller(sessionID); err != nil {
+	if _, err := runtime.optionalCaller(sessionID); err != nil {
 		return GroupRemoval{}, err
 	}
 	removed, moved, err := runtime.store.RemoveGroup(path)
@@ -301,19 +301,26 @@ func (s *Sessions) Create(sessionID string, opts CreateSessionOptions) (Session,
 		return Session{}, err
 	}
 	defer runtime.store.Close()
-	caller, err := runtime.caller(sessionID)
+	caller, err := runtime.optionalCaller(sessionID)
 	if err != nil {
 		return Session{}, err
 	}
 	toolName := strings.TrimSpace(opts.Tool)
 	if toolName == "" {
-		// A spawn with no tool named runs whatever the caller runs, which a
-		// terminal cannot supply: its tool is the user's shell. Guessing an
-		// agent for it would start a CLI nobody asked for.
-		if runtime.cfg.Tools[caller.Tool].Shell {
-			return Session{}, fmt.Errorf("a terminal runs a shell, not an agent CLI, so there is none to inherit; name one with %s (configured tools are %s)", runtime.words.SpawnTool, strings.Join(agentToolNames(runtime), ", "))
+		if caller.ID == "" {
+			toolName, err = runtime.defaultAgentTool()
+			if err != nil {
+				return Session{}, err
+			}
+		} else {
+			// A spawn with no tool named runs whatever the caller runs, which a
+			// terminal cannot supply: its tool is the user's shell. Guessing an
+			// agent for it would start a CLI nobody asked for.
+			if runtime.cfg.Tools[caller.Tool].Shell {
+				return Session{}, fmt.Errorf("a terminal runs a shell, not an agent CLI, so there is none to inherit; name one with %s (configured tools are %s)", runtime.words.SpawnTool, strings.Join(agentToolNames(runtime), ", "))
+			}
+			toolName = caller.Tool
 		}
-		toolName = caller.Tool
 	}
 	tool, known := runtime.cfg.Tools[toolName]
 	if !known {
@@ -465,6 +472,23 @@ func agentToolNames(r *runtime) []string {
 	return names
 }
 
+func (r *runtime) defaultAgentTool() (string, error) {
+	hidden, err := r.store.Setting("hidden_tools")
+	if err != nil {
+		return "", err
+	}
+	chosen, err := r.store.Setting("default_tool")
+	if err != nil {
+		return "", err
+	}
+	names := config.EnabledAgentTools(r.cfg, config.HiddenTools(hidden))
+	tool := config.DefaultAgentTool(names, chosen)
+	if tool == "" {
+		return "", errors.New("no CLIs enabled: open settings (s), then CLIs, to turn some on")
+	}
+	return tool, nil
+}
+
 type SendResult struct {
 	MessageID     int64 `json:"message_id" jsonschema:"pass to message_status to see whether it arrived"`
 	QueuePosition int   `json:"queue_position" jsonschema:"this message's place in the recipient's queue; 1 means it is next"`
@@ -493,7 +517,7 @@ func (s *Sessions) Send(sessionID, targetID, message string) (SendResult, error)
 		return SendResult{}, err
 	}
 	defer runtime.store.Close()
-	caller, err := runtime.caller(sessionID)
+	caller, err := runtime.optionalCaller(sessionID)
 	if err != nil {
 		return SendResult{}, err
 	}
@@ -508,10 +532,14 @@ func (s *Sessions) Send(sessionID, targetID, message string) (SendResult, error)
 		return SendResult{}, err
 	}
 	now := time.Now()
+	senderName := caller.Name
+	if caller.ID == "" {
+		senderName = "external automation"
+	}
 	id, err := runtime.store.Enqueue(store.InboxMessage{
 		SessionID:   target.ID,
 		SenderID:    caller.ID,
-		SenderName:  caller.Name,
+		SenderName:  senderName,
 		Body:        message,
 		Fingerprint: fingerprint(message),
 		SentAt:      now,
@@ -521,8 +549,10 @@ func (s *Sessions) Send(sessionID, targetID, message string) (SendResult, error)
 	}
 	// Answering is the acknowledgement: whatever this session was sent by
 	// the agent it is now writing to has plainly been read.
-	if err := runtime.store.MarkRead(caller.ID, target.ID, now); err != nil {
-		return SendResult{}, err
+	if caller.ID != "" {
+		if err := runtime.store.MarkRead(caller.ID, target.ID, now); err != nil {
+			return SendResult{}, err
+		}
 	}
 	queued, err := runtime.store.QueuedCount(target.ID)
 	if err != nil {
@@ -542,13 +572,13 @@ func (s *Sessions) MessageStatus(sessionID string, messageID int64) (MessageStat
 		return MessageState{}, err
 	}
 	defer runtime.store.Close()
-	caller, err := runtime.caller(sessionID)
+	caller, err := runtime.optionalCaller(sessionID)
 	if err != nil {
 		return MessageState{}, err
 	}
 	msg, err := runtime.store.Message(messageID, caller.ID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return MessageState{}, fmt.Errorf("message %d was not sent by this session, or has aged out of the log", messageID)
+		return MessageState{}, fmt.Errorf("message %d was not sent by this caller, or has aged out of the log", messageID)
 	}
 	if err != nil {
 		return MessageState{}, err
@@ -627,7 +657,7 @@ type MessageState struct {
 	MessageID   int64  `json:"message_id"`
 	SessionID   string `json:"session_id" jsonschema:"session the message was addressed to"`
 	Body        string `json:"body"`
-	State       string `json:"state" jsonschema:"queued (waiting for the agent to be at rest), held (nothing will type it in as things stand: the recipient is sitting on a dialog, archived or not running, and reason says which), delivered (typed into its prompt), dropped (it never reached the prompt and is not retried), or answered (it has since messaged back)"`
+	State       string `json:"state" jsonschema:"queued (waiting for the agent to be at rest), held (nothing will type it in as things stand: the recipient is sitting on a dialog, archived or not running, and reason says which), delivered (typed into its prompt), dropped (it never reached the prompt and is not retried), or answered (for a session sender, it has since messaged back)"`
 	DeliveredAt string `json:"delivered_at,omitempty" jsonschema:"RFC3339 time the message reached the prompt"`
 	Reason      string `json:"reason,omitempty" jsonschema:"why the message is in that state, and what to do about it"`
 }
@@ -651,7 +681,7 @@ func (s *Sessions) Read(sessionID, targetID string) (SessionScreen, error) {
 		return SessionScreen{}, err
 	}
 	defer runtime.store.Close()
-	if _, err := runtime.caller(sessionID); err != nil {
+	if _, err := runtime.optionalCaller(sessionID); err != nil {
 		return SessionScreen{}, err
 	}
 	target, err := runtime.agent(targetID)
@@ -690,7 +720,7 @@ func (s *Sessions) Kill(sessionID, targetID string) (Session, error) {
 		return Session{}, err
 	}
 	defer runtime.store.Close()
-	if _, err := runtime.caller(sessionID); err != nil {
+	if _, err := runtime.optionalCaller(sessionID); err != nil {
 		return Session{}, err
 	}
 	target, err := runtime.agent(targetID)
@@ -731,7 +761,7 @@ func (s *Sessions) Revive(sessionID, targetID string) (Session, error) {
 		return Session{}, err
 	}
 	defer runtime.store.Close()
-	if _, err := runtime.caller(sessionID); err != nil {
+	if _, err := runtime.optionalCaller(sessionID); err != nil {
 		return Session{}, err
 	}
 	target, err := runtime.agent(targetID)
@@ -804,7 +834,7 @@ func (s *Sessions) Archive(sessionID, targetID string, archived bool) (Session, 
 		return Session{}, err
 	}
 	defer runtime.store.Close()
-	if _, err := runtime.caller(sessionID); err != nil {
+	if _, err := runtime.optionalCaller(sessionID); err != nil {
 		return Session{}, err
 	}
 	target, err := runtime.agent(targetID)

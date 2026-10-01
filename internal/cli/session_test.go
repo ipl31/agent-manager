@@ -221,3 +221,29 @@ func TestMessageStatusRefusesANonNumericID(t *testing.T) {
 		t.Fatalf("error = %v, want it to say where the id comes from", err)
 	}
 }
+
+func TestAsOverridesCallerWithoutConsumingPromptOrMessage(t *testing.T) {
+	f := &fakeSessions{session: sampleSession()}
+	if err := runSpawn(&bytes.Buffer{}, f, []string{"--prompt", "--as", "--as=beef1234"}, "cafe0001"); err != nil {
+		t.Fatal(err)
+	}
+	if f.callerID != "beef1234" || f.opts.Prompt != "--as" {
+		t.Fatalf("caller = %q, prompt = %q", f.callerID, f.opts.Prompt)
+	}
+	f = &fakeSessions{session: sampleSession()}
+	if err := runSend(&bytes.Buffer{}, f, []string{"beef1234", "--as", "cafe0001", "--", "--as"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if f.callerID != "cafe0001" || f.message != "--as" {
+		t.Fatalf("caller = %q, message = %q", f.callerID, f.message)
+	}
+	for _, args := range [][]string{{"--as", ""}, {"--as= "}} {
+		f = &fakeSessions{session: sampleSession()}
+		if err := runSessions(&bytes.Buffer{}, f, args, "cafe0001"); err == nil || !strings.Contains(err.Error(), "--as requires") {
+			t.Fatalf("args %q: error = %v", args, err)
+		}
+		if f.callerID != "" {
+			t.Fatalf("args %q called layer as %q", args, f.callerID)
+		}
+	}
+}

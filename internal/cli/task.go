@@ -8,12 +8,12 @@ import (
 )
 
 const (
-	usageTaskList    = "task list [--json]"
-	usageTaskCreate  = "task create <title> [--body <text>] [--depends-on <id,id>] [--json]"
-	usageTaskClaim   = "task claim [<task-id>] [--json]"
-	usageTaskFinish  = "task finish <task-id> [--json]"
-	usageTaskRelease = "task release <task-id> [--json]"
-	usageTaskDelete  = "task delete <task-id>"
+	usageTaskList    = "task list [--json] [--as <session-id>]"
+	usageTaskCreate  = "task create <title> [--body <text>] [--depends-on <id,id>] [--json] [--as <session-id>]"
+	usageTaskClaim   = "task claim [<task-id>] [--json] [--as <session-id>]"
+	usageTaskFinish  = "task finish <task-id> [--json] [--as <session-id>]"
+	usageTaskRelease = "task release <task-id> [--json] [--as <session-id>]"
+	usageTaskDelete  = "task delete <task-id> [--as <session-id>]"
 )
 
 type taskCommands interface {
@@ -46,6 +46,7 @@ func taskSection() section {
 
 func runTaskList(out io.Writer, tasks taskCommands, args []string, sessionID string) error {
 	set := newFlagSet(usageTaskList)
+	callerFlag(set, &sessionID)
 	asJSON := jsonFlag(set)
 	if _, err := parseCommand(out, set, args, 0, 0); err != nil {
 		return err
@@ -59,6 +60,7 @@ func runTaskList(out io.Writer, tasks taskCommands, args []string, sessionID str
 
 func runTaskCreate(out io.Writer, tasks taskCommands, args []string, sessionID string) error {
 	set := newFlagSet(usageTaskCreate)
+	callerFlag(set, &sessionID)
 	body := set.String("body", "", "full instruction for whoever claims it; it cannot see your conversation")
 	var dependsOn stringList
 	set.Var(&dependsOn, "depends-on", "ids of tasks that must be done first, repeatable or comma separated")
@@ -76,6 +78,7 @@ func runTaskCreate(out io.Writer, tasks taskCommands, args []string, sessionID s
 
 func runTaskClaim(out io.Writer, tasks taskCommands, args []string, sessionID string) error {
 	set := newFlagSet(usageTaskClaim)
+	callerFlag(set, &sessionID)
 	asJSON := jsonFlag(set)
 	operands, err := parseCommand(out, set, args, 0, 1)
 	if err != nil {
@@ -94,6 +97,7 @@ func runTaskClaim(out io.Writer, tasks taskCommands, args []string, sessionID st
 
 func runTaskFinish(out io.Writer, tasks taskCommands, args []string, sessionID string) error {
 	set := newFlagSet(usageTaskFinish)
+	callerFlag(set, &sessionID)
 	asJSON := jsonFlag(set)
 	operands, err := parseCommand(out, set, args, 1, 1)
 	if err != nil {
@@ -108,6 +112,7 @@ func runTaskFinish(out io.Writer, tasks taskCommands, args []string, sessionID s
 
 func runTaskRelease(out io.Writer, tasks taskCommands, args []string, sessionID string) error {
 	set := newFlagSet(usageTaskRelease)
+	callerFlag(set, &sessionID)
 	asJSON := jsonFlag(set)
 	operands, err := parseCommand(out, set, args, 1, 1)
 	if err != nil {
@@ -122,6 +127,7 @@ func runTaskRelease(out io.Writer, tasks taskCommands, args []string, sessionID 
 
 func runTaskDelete(out io.Writer, tasks taskCommands, args []string, sessionID string) error {
 	set := newFlagSet(usageTaskDelete)
+	callerFlag(set, &sessionID)
 	operands, err := parseCommand(out, set, args, 1, 1)
 	if err != nil {
 		return err

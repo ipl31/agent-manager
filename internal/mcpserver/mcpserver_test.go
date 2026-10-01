@@ -65,6 +65,8 @@ func (f *fakeTerminalCommands) Close(_ string, id string) error {
 }
 
 type fakeSessionCommands struct {
+	listCaller    string
+	createCaller  string
 	listed        []sessioncmd.Session
 	created       sessioncmd.Session
 	screen        sessioncmd.SessionScreen
@@ -97,11 +99,13 @@ type fakeSessionCommands struct {
 	err           error
 }
 
-func (f *fakeSessionCommands) List(string) ([]sessioncmd.Session, error) {
+func (f *fakeSessionCommands) List(sessionID string) ([]sessioncmd.Session, error) {
+	f.listCaller = sessionID
 	return f.listed, f.err
 }
 
-func (f *fakeSessionCommands) Create(_ string, opts sessioncmd.CreateSessionOptions) (sessioncmd.Session, error) {
+func (f *fakeSessionCommands) Create(sessionID string, opts sessioncmd.CreateSessionOptions) (sessioncmd.Session, error) {
+	f.createCaller = sessionID
 	f.createdOpts = opts
 	return f.created, f.err
 }
@@ -1208,5 +1212,19 @@ func TestServerTeachesWhenToOfferAReport(t *testing.T) {
 		if !strings.Contains(instructions, want) {
 			t.Fatalf("server instructions do not teach %q:\n%s", want, instructions)
 		}
+	}
+}
+
+func TestExternalMCPCallerCanDispatchWorkspaceTools(t *testing.T) {
+	fake := &fakeSessionCommands{created: sessioncmd.Session{ID: "abcd1234", Name: "external-ticket"}}
+	session := connectServer(t, newServer(t.TempDir(), "", "test", &fakeTerminalCommands{}, fake, &fakeReporter{}))
+	if result := callTool(t, session, "list_sessions", map[string]any{}); result.IsError {
+		t.Fatalf("caller-free list_sessions = %+v", result)
+	}
+	if result := callTool(t, session, "create_session", map[string]any{"name": "external-ticket"}); result.IsError {
+		t.Fatalf("caller-free create_session = %+v", result)
+	}
+	if fake.listCaller != "" || fake.createCaller != "" {
+		t.Fatalf("external MCP callers = %q, %q", fake.listCaller, fake.createCaller)
 	}
 }

@@ -1,7 +1,8 @@
 // Package mcpserver exposes agent-manager's session commands as MCP tools
 // over stdio, so any MCP-capable agent discovers and calls them natively.
 // The manager registers this server into every session it spawns; the
-// session id travels via the AGENT_MANAGER_SESSION_ID environment variable.
+// session id travels via AGENT_MANAGER_SESSION_ID for managed sessions;
+// external servers can call workspace tools without one.
 package mcpserver
 
 import (
@@ -55,9 +56,9 @@ type listSessionsArgs struct{}
 type createSessionArgs struct {
 	Name      string  `json:"name,omitempty" jsonschema:"kebab-case name for the new session, 2-4 words naming the work it will do (e.g. payments-retry-fix); leave empty only when the task is unknown, and the new agent will name itself"`
 	Prompt    string  `json:"prompt,omitempty" jsonschema:"first task to hand the new agent, written as a full instruction; it starts idle when empty"`
-	Tool      string  `json:"tool,omitempty" jsonschema:"agent CLI to run, such as claude, codex, opencode, gemini or grok; defaults to the caller's CLI, and is required when the caller is a terminal; call list_sessions to see which are in use"`
-	Group     *string `json:"group,omitempty" jsonschema:"existing group path to file the session under; pass an empty string for the root group; defaults to this agent's group; call list_groups for the existing ones"`
-	Directory string  `json:"directory,omitempty" jsonschema:"existing directory the session works in; defaults to this agent's own directory, or to the selected group's inherited path when group is set"`
+	Tool      string  `json:"tool,omitempty" jsonschema:"agent CLI to run, such as claude, codex, opencode, gemini or grok; defaults to the caller's CLI, or the enabled Settings default without a caller; required from a managed terminal; call list_sessions to see which are in use"`
+	Group     *string `json:"group,omitempty" jsonschema:"existing group path to file the session under; pass an empty string for the root group; defaults to the caller's group, or root without a caller; call list_groups for the existing ones"`
+	Directory string  `json:"directory,omitempty" jsonschema:"existing directory the session works in; defaults to the selected group's inherited path, then the caller's directory or process cwd"`
 	Worktree  *bool   `json:"worktree,omitempty" jsonschema:"true gives the session its own git worktree and branch off the directory's repo, which is what keeps parallel agents from overwriting each other; omit to inherit the group's default"`
 }
 
@@ -196,7 +197,7 @@ type sessionCommands interface {
 // subagents instead. Claude Code truncates the block at 2048 characters, so
 // it stays under that; what individual tool descriptions already carry (the
 // review targets, the queueing rules) is left to them.
-const serverInstructions = `Agent Manager runs this conversation in one of the user's managed tmux sessions. The others are separate CLI processes with contexts of their own, running any CLI the user chose (Claude Code, Codex, Gemini), never subagents of this conversation. These tools operate that workspace. Use them whenever the conditions below apply, without waiting to be asked.
+const serverInstructions = `Agent Manager runs managed CLI sessions; this caller may be external. Other agents (Codex and others) are separate CLI processes with their own contexts, never subagents of this conversation. Use these workspace tools when relevant, without waiting to be asked. Claiming tasks, reserving files, review and terminal tools require a managed caller.
 
 Delegating to other agents. When the work holds two or more deliverables that could be built at once, or the user asks for parallel work, a second opinion or another agent: call list_sessions, reuse a relevant idle session, otherwise create_session per part, each with a descriptive name and a prompt stating the whole task, as it cannot see this conversation. Repo work takes worktree: true so parallel agents never share a checkout; where they do, reserve_files before editing. Then read_session, send_session to answer or redirect an agent, and wait_for_session when your next step needs one finished. Put the plan on the shared task list with the task tool, which spawned agents claim from. Group related spawns with create_group, archive_session once done. Sessions spend the user's tokens: one per workstream, not per step.
 

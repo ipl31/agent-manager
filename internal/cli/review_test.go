@@ -39,7 +39,7 @@ func TestRenameWritesNameFile(t *testing.T) {
 
 func TestRenameValidation(t *testing.T) {
 	dir := t.TempDir()
-	const usage = `usage: agent-manager rename "<name>"`
+	const usage = `usage: agent-manager rename "<name>" [--as <session-id>]`
 	cases := []struct {
 		label     string
 		args      []string
@@ -126,7 +126,7 @@ func TestReviewRepoRejectsBadInput(t *testing.T) {
 	if err := runReviewRepo(&bytes.Buffer{}, []string{t.TempDir()}, "abc123", configDir); err == nil {
 		t.Error("a path that is not a repo should fail")
 	}
-	const usage = "usage: agent-manager review-repo <path>"
+	const usage = "usage: agent-manager review-repo <path> [--as <session-id>]"
 	for _, args := range [][]string{nil, {"  "}} {
 		err := runReviewRepo(&bytes.Buffer{}, args, "abc123", configDir)
 		if err == nil || err.Error() != usage {
@@ -256,7 +256,7 @@ func TestReviewBaseRejectsBadInput(t *testing.T) {
 	repo := initRepo(t)
 	commitFile(t, repo)
 	configDir := t.TempDir()
-	const usage = "usage: agent-manager review-base <ref>|--clear"
+	const usage = "usage: agent-manager review-base <ref>|--clear [--as <session-id>]"
 
 	t.Run("missing session id", func(t *testing.T) {
 		t.Chdir(repo)
@@ -362,4 +362,15 @@ func gitOutput(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %v: %v: %s", args, err, out)
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func TestExplicitAsMustNameExistingSessionBeforeMailboxWrite(t *testing.T) {
+	dir := t.TempDir()
+	err := runRename(&bytes.Buffer{}, []string{"new-name", "--as", "deadbeef"}, "cafe0001", dir)
+	if err == nil || !strings.Contains(err.Error(), "no longer exists") {
+		t.Fatalf("stale --as = %v", err)
+	}
+	if _, err := os.Stat(hooks.NewManager(dir).NameFile("deadbeef")); !os.IsNotExist(err) {
+		t.Fatalf("stale --as wrote mailbox: %v", err)
+	}
 }

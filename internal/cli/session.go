@@ -13,18 +13,18 @@ import (
 )
 
 const (
-	usageSessions      = "sessions [--json]"
-	usageSpawn         = "spawn [--name <name>] [--prompt <text>] [--tool <cli>] [--group <path>] [--directory <path>] [--worktree] [--json]"
-	usageSend          = `send <session-id> "<message>" [--json]`
-	usageRead          = "read <session-id> [--json]"
-	usageWait          = "wait <session-id> [--until <state>] [--timeout <duration>] [--json]"
-	usageMessageStatus = "message-status <message-id> [--json]"
-	usageKill          = "kill <session-id> [--json]"
-	usageRevive        = "revive <session-id> [--json]"
-	usageArchive       = "archive <session-id> [--restore] [--json]"
-	usageGroups        = "groups [--json]"
-	usageCreateGroup   = "create-group <path> [--directory <path>] [--json]"
-	usageDeleteGroup   = "delete-group <path> [--json]"
+	usageSessions      = "sessions [--json] [--as <session-id>]"
+	usageSpawn         = "spawn [--name <name>] [--prompt <text>] [--tool <cli>] [--group <path>] [--directory <path>] [--worktree] [--json] [--as <session-id>]"
+	usageSend          = `send <session-id> "<message>" [--json] [--as <session-id>]`
+	usageRead          = "read <session-id> [--json] [--as <session-id>]"
+	usageWait          = "wait <session-id> [--until <state>] [--timeout <duration>] [--json] [--as <session-id>]"
+	usageMessageStatus = "message-status <message-id> [--json] [--as <session-id>]"
+	usageKill          = "kill <session-id> [--json] [--as <session-id>]"
+	usageRevive        = "revive <session-id> [--json] [--as <session-id>]"
+	usageArchive       = "archive <session-id> [--restore] [--json] [--as <session-id>]"
+	usageGroups        = "groups [--json] [--as <session-id>]"
+	usageCreateGroup   = "create-group <path> [--directory <path>] [--json] [--as <session-id>]"
+	usageDeleteGroup   = "delete-group <path> [--json] [--as <session-id>]"
 )
 
 type sessionCommands interface {
@@ -68,6 +68,7 @@ func sessionSection() section {
 
 func runSessions(out io.Writer, sessions sessionCommands, args []string, sessionID string) error {
 	set := newFlagSet(usageSessions)
+	callerFlag(set, &sessionID)
 	asJSON := jsonFlag(set)
 	if _, err := parseCommand(out, set, args, 0, 0); err != nil {
 		return err
@@ -81,11 +82,12 @@ func runSessions(out io.Writer, sessions sessionCommands, args []string, session
 
 func runSpawn(out io.Writer, sessions sessionCommands, args []string, sessionID string) error {
 	set := newFlagSet(usageSpawn)
+	callerFlag(set, &sessionID)
 	name := set.String("name", "", "kebab-case name naming the work it will do; the new agent names itself when this is empty")
 	prompt := set.String("prompt", "", "first task to hand it, written as a full instruction, since it cannot see your conversation")
-	tool := set.String("tool", "", "agent CLI to run; defaults to the caller's CLI, and is required when the caller is a terminal")
-	group := set.String("group", "", "existing group path to file it under; pass an empty string for the root group")
-	directory := set.String("directory", "", "existing directory it works in; defaults to yours, or to the group's inherited path")
+	tool := set.String("tool", "", "agent CLI to run; defaults to the caller's CLI, or the Settings default without a caller; required from a managed terminal")
+	group := set.String("group", "", "existing group path to file it under; omitted uses the caller's group or root without a caller")
+	directory := set.String("directory", "", "existing directory it works in; defaults to the group's inherited path, caller's directory, or shell cwd")
 	worktree := set.Bool("worktree", false, "give it its own git worktree and branch, which is what keeps parallel agents off each other's files")
 	asJSON := jsonFlag(set)
 	if _, err := parseCommand(out, set, args, 0, 0); err != nil {
@@ -116,6 +118,7 @@ func runSpawn(out io.Writer, sessions sessionCommands, args []string, sessionID 
 
 func runSend(out io.Writer, sessions sessionCommands, args []string, sessionID string) error {
 	set := newFlagSet(usageSend)
+	callerFlag(set, &sessionID)
 	asJSON := jsonFlag(set)
 	operands, err := parseCommand(out, set, args, 2, 2)
 	if err != nil {
@@ -130,6 +133,7 @@ func runSend(out io.Writer, sessions sessionCommands, args []string, sessionID s
 
 func runRead(out io.Writer, sessions sessionCommands, args []string, sessionID string) error {
 	set := newFlagSet(usageRead)
+	callerFlag(set, &sessionID)
 	asJSON := jsonFlag(set)
 	operands, err := parseCommand(out, set, args, 1, 1)
 	if err != nil {
@@ -147,6 +151,7 @@ func runRead(out io.Writer, sessions sessionCommands, args []string, sessionID s
 // caller expects. The result still goes out first, JSON included.
 func runWait(out io.Writer, sessions sessionCommands, args []string, sessionID string) error {
 	set := newFlagSet(usageWait)
+	callerFlag(set, &sessionID)
 	var until stringList
 	set.Var(&until, "until", "state that ends the wait, repeatable or comma separated; defaults to every state meaning the session stopped working")
 	timeout := set.Duration("timeout", 0, "how long to wait before giving up, default "+sessioncmd.DefaultWaitTimeout.String()+", maximum "+sessioncmd.MaxWaitTimeout.String())
@@ -173,6 +178,7 @@ func runWait(out io.Writer, sessions sessionCommands, args []string, sessionID s
 
 func runMessageStatus(out io.Writer, sessions sessionCommands, args []string, sessionID string) error {
 	set := newFlagSet(usageMessageStatus)
+	callerFlag(set, &sessionID)
 	asJSON := jsonFlag(set)
 	operands, err := parseCommand(out, set, args, 1, 1)
 	if err != nil {
@@ -191,6 +197,7 @@ func runMessageStatus(out io.Writer, sessions sessionCommands, args []string, se
 
 func runKill(out io.Writer, sessions sessionCommands, args []string, sessionID string) error {
 	set := newFlagSet(usageKill)
+	callerFlag(set, &sessionID)
 	asJSON := jsonFlag(set)
 	operands, err := parseCommand(out, set, args, 1, 1)
 	if err != nil {
@@ -205,6 +212,7 @@ func runKill(out io.Writer, sessions sessionCommands, args []string, sessionID s
 
 func runRevive(out io.Writer, sessions sessionCommands, args []string, sessionID string) error {
 	set := newFlagSet(usageRevive)
+	callerFlag(set, &sessionID)
 	asJSON := jsonFlag(set)
 	operands, err := parseCommand(out, set, args, 1, 1)
 	if err != nil {
@@ -219,6 +227,7 @@ func runRevive(out io.Writer, sessions sessionCommands, args []string, sessionID
 
 func runArchive(out io.Writer, sessions sessionCommands, args []string, sessionID string) error {
 	set := newFlagSet(usageArchive)
+	callerFlag(set, &sessionID)
 	restore := set.Bool("restore", false, "put an archived session back on the active list")
 	asJSON := jsonFlag(set)
 	operands, err := parseCommand(out, set, args, 1, 1)
@@ -234,6 +243,7 @@ func runArchive(out io.Writer, sessions sessionCommands, args []string, sessionI
 
 func runGroups(out io.Writer, sessions sessionCommands, args []string, sessionID string) error {
 	set := newFlagSet(usageGroups)
+	callerFlag(set, &sessionID)
 	asJSON := jsonFlag(set)
 	if _, err := parseCommand(out, set, args, 0, 0); err != nil {
 		return err
@@ -247,6 +257,7 @@ func runGroups(out io.Writer, sessions sessionCommands, args []string, sessionID
 
 func runCreateGroup(out io.Writer, sessions sessionCommands, args []string, sessionID string) error {
 	set := newFlagSet(usageCreateGroup)
+	callerFlag(set, &sessionID)
 	directory := set.String("directory", "", "default working directory sessions created in this group inherit")
 	asJSON := jsonFlag(set)
 	operands, err := parseCommand(out, set, args, 1, 1)
@@ -262,6 +273,7 @@ func runCreateGroup(out io.Writer, sessions sessionCommands, args []string, sess
 
 func runDeleteGroup(out io.Writer, sessions sessionCommands, args []string, sessionID string) error {
 	set := newFlagSet(usageDeleteGroup)
+	callerFlag(set, &sessionID)
 	asJSON := jsonFlag(set)
 	operands, err := parseCommand(out, set, args, 1, 1)
 	if err != nil {

@@ -365,3 +365,24 @@ func TestRacingSessionsSplitTheListWithoutSharingATask(t *testing.T) {
 		}
 	}
 }
+
+func TestCallerFreeTasksDoNotOwnPendingWork(t *testing.T) {
+	h := newSessionHarness(t)
+	created, err := h.sessions.CreateTask("", "external ticket", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Mine {
+		t.Fatalf("anonymous task is mine: %+v", created)
+	}
+	listed, err := h.sessions.Tasks("")
+	if err != nil || len(listed) != 1 || listed[0].Mine {
+		t.Fatalf("anonymous tasks = %+v, %v", listed, err)
+	}
+	if _, err := h.sessions.ClaimTask("", created.ID); err == nil {
+		t.Fatal("anonymous claim succeeded")
+	}
+	if err := h.sessions.DeleteTask("", created.ID); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -164,7 +164,7 @@ func (s *Sessions) Reservations(sessionID string) ([]Reservation, error) {
 		return nil, err
 	}
 	defer runtime.store.Close()
-	caller, err := runtime.caller(sessionID)
+	caller, err := runtime.optionalCaller(sessionID)
 	if err != nil {
 		return nil, err
 	}

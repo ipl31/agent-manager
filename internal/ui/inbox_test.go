@@ -853,3 +853,16 @@ func TestInboxDeliversWhenARuleReportsARestingState(t *testing.T) {
 		t.Fatal("a resting rule state blocked delivery for good")
 	}
 }
+
+func TestExternalMessageHasNoSessionReply(t *testing.T) {
+	msg := store.InboxMessage{SenderName: "external automation", Body: "check ticket", SentAt: time.Now()}
+	for _, style := range []string{"claude", mcpreg.StyleNone} {
+		envelope := inboxEnvelope(msg, style, false)
+		if !strings.Contains(envelope, "Message from external automation") || !strings.Contains(envelope, "check ticket") {
+			t.Fatalf("external envelope = %q", envelope)
+		}
+		if strings.Contains(envelope, "session )") || strings.Contains(envelope, "reply with") || strings.Contains(envelope, "reply by running") {
+			t.Fatalf("external envelope offers a reply: %q", envelope)
+		}
+	}
+}

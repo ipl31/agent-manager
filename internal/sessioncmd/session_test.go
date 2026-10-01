@@ -584,7 +584,7 @@ func TestASenderSeesItsMessageDeliveredThenAnswered(t *testing.T) {
 	// Only the sender may follow it; another session asking is told so
 	// rather than shown someone else's traffic.
 	if _, err := h.sessions.MessageStatus(worker.ID, sent.MessageID); err == nil ||
-		!strings.Contains(err.Error(), "was not sent by this session") {
+		!strings.Contains(err.Error(), "was not sent by this caller") {
 		t.Fatalf("reading another session's message = %v", err)
 	}
 }
@@ -1154,4 +1154,79 @@ func TestSessionsCreateFromATerminalAsksForATool(t *testing.T) {
 		t.Fatalf("created from a terminal = %+v, terminal = %+v", created, terminal)
 	}
 	waitForSessionOutput(t, h.sessions, h.caller.ID, created.ID, "ship the fix")
+}
+
+func TestCallerFreeSpawnUsesSettingsAndGroupDirectory(t *testing.T) {
+	h := newSessionHarness(t)
+	if err := h.store.SetSetting("default_tool", "flagged"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.SetSetting("hidden_tools", "echoer"); err != nil {
+		t.Fatal(err)
+	}
+	created, err := h.sessions.Create("", CreateSessionOptions{Name: "external", Prompt: "ticket task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Tool != "flagged" || created.Group != "" || !sameTerminalPath(created.Directory, cwd) {
+		t.Fatalf("caller-free spawn = %+v, cwd = %s", created, cwd)
+	}
+	if row, err := h.store.Get(created.ID); err != nil || row.ParentID != "" {
+		t.Fatalf("spawn row = %+v, %v", row, err)
+	}
+	listed, err := h.sessions.List("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range listed {
+		if row.Self {
+			t.Fatalf("anonymous list marks %s as self", row.ID)
+		}
+	}
+	group := "backend"
+	inGroup, err := h.sessions.Create("", CreateSessionOptions{Name: "grouped", Group: &group})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inGroup.Group != group || !sameTerminalPath(inGroup.Directory, h.caller.Cwd) {
+		t.Fatalf("group spawn = %+v", inGroup)
+	}
+	if _, err := h.sessions.Create("gone", CreateSessionOptions{Name: "stale"}); err == nil {
+		t.Fatal("stale caller was treated as anonymous")
+	}
+}
+
+func TestCallerFreeSendTracksItsOwnMessage(t *testing.T) {
+	h := newSessionHarness(t)
+	created, err := h.sessions.Create(h.caller.ID, CreateSessionOptions{Tool: "resting", Name: "recipient"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForSessionOutput(t, h.sessions, "", created.ID, "❯")
+	sent, err := h.sessions.Send("", created.ID, "external task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := h.sessions.MessageStatus("", sent.MessageID)
+	if err != nil || state.State != "queued" {
+		t.Fatalf("anonymous message = %+v, %v", state, err)
+	}
+	if _, err := h.sessions.MessageStatus(h.caller.ID, sent.MessageID); err == nil {
+		t.Fatal("session caller saw anonymous message")
+	}
+	msg, err := h.store.Message(sent.MessageID, "")
+	if err != nil || msg.SenderID != "" || msg.SenderName != "external automation" {
+		t.Fatalf("stored anonymous message = %+v, %v", msg, err)
+	}
+	if err := h.store.UpdateStatus(created.ID, status.Idle); err != nil {
+		t.Fatal(err)
+	}
+	waited, err := h.sessions.Wait(context.Background(), "", created.ID, []string{"idle"}, 100*time.Millisecond)
+	if err != nil || waited.Reached {
+		t.Fatalf("wait before external delivery = %+v, %v", waited, err)
+	}
 }

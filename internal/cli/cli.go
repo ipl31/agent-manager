@@ -67,7 +67,7 @@ func Help(version string) string {
 	help.WriteString("Usage: agent-manager [command]\n\n")
 	help.WriteString("Run the interactive manager when no command is given.\n\n")
 	help.WriteString("agent-manager runs your session beside the user's other agents and terminals.\n")
-	help.WriteString("update needs no caller, and issue and feature use only the exported session id. Every other command acts as the session or terminal it runs in, resolved from the environment or from the tmux pane, so run them from your own shell.\n")
+	help.WriteString("Session, group, and shared task commands also work from a plain shell with no calling session. Commands that own a session's work need one: pass --as <session-id>, or run inside a managed session. Explicit --as overrides the environment, tmux pane, and process ancestry. update needs no caller; issue and feature use only the exported session id.\n")
 	for _, section := range sections(version) {
 		help.WriteString("\n" + section.title + "\n")
 		help.WriteString(usageLines(section.commands))
@@ -148,6 +148,23 @@ func newFlagSet(usage string) *flag.FlagSet {
 	return set
 }
 
+func callerFlag(set *flag.FlagSet, sessionID *string) {
+	set.Var(&callerOverride{sessionID: sessionID}, "as", "act as this existing session; overrides the environment and pane")
+}
+
+type callerOverride struct {
+	sessionID *string
+	value     string
+}
+
+func (c *callerOverride) String() string { return c.value }
+
+func (c *callerOverride) Set(value string) error {
+	c.value = value
+	*c.sessionID = value
+	return nil
+}
+
 func jsonFlag(set *flag.FlagSet) *bool {
 	return set.Bool("json", false, "print the raw result as JSON instead of a sentence")
 }
@@ -166,6 +183,15 @@ func parseCommand(out io.Writer, set *flag.FlagSet, args []string, min, max int)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("%w; usage: agent-manager %s", err, set.Name())
+	}
+	var emptyAs bool
+	set.Visit(func(given *flag.Flag) {
+		if given.Name == "as" && strings.TrimSpace(given.Value.String()) == "" {
+			emptyAs = true
+		}
+	})
+	if emptyAs {
+		return nil, fmt.Errorf("--as requires a session id; usage: agent-manager %s", set.Name())
 	}
 	if len(operands) < min || (max != anyNumber && len(operands) > max) {
 		return nil, usageError(set.Name())

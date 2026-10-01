@@ -6,6 +6,7 @@ package sessioncmd
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -25,12 +26,28 @@ var reviewCommentIDPattern = regexp.MustCompile(`^[0-9a-f]{16}$`)
 
 func validSession(sessionID string) error {
 	if sessionID == "" {
-		return fmt.Errorf("not inside an Agent Manager session or terminal (%s is unset and this pane is not one Agent Manager runs)", hooks.EnvSessionID)
+		return fmt.Errorf("not inside an Agent Manager session or terminal (%s is unset and this pane is not one Agent Manager runs); pass --as <session-id> to act as an existing session", hooks.EnvSessionID)
 	}
 	if !sessionIDPattern.MatchString(sessionID) {
 		return fmt.Errorf("invalid session id %q", sessionID)
 	}
 	return nil
+}
+
+func ValidateCaller(configDir, sessionID string) error {
+	if err := validSession(sessionID); err != nil {
+		return err
+	}
+	st, err := store.Open(filepath.Join(configDir, "state.db"))
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	_, err = st.Get(sessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("calling session %s no longer exists", sessionID)
+	}
+	return err
 }
 
 // The manager polls these files, so one lands complete or not at all: a

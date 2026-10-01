@@ -32,7 +32,7 @@ func (s *Sessions) Tasks(sessionID string) ([]Task, error) {
 		return nil, err
 	}
 	defer runtime.store.Close()
-	if _, err := runtime.caller(sessionID); err != nil {
+	if _, err := runtime.optionalCaller(sessionID); err != nil {
 		return nil, err
 	}
 	return runtime.taskList(sessionID)
@@ -64,7 +64,7 @@ func (r *runtime) taskList(sessionID string) ([]Task, error) {
 			DependsOn: task.DependsOn,
 			BlockedBy: blocking,
 			Blocked:   task.State == store.TaskPending && len(blocking) > 0,
-			Mine:      task.Owner == sessionID,
+			Mine:      sessionID != "" && task.Owner == sessionID,
 		})
 	}
 	return tasks, nil
@@ -105,7 +105,7 @@ func (s *Sessions) CreateTask(sessionID, title, body string, dependsOn []string)
 		return Task{}, err
 	}
 	defer runtime.store.Close()
-	if _, err := runtime.caller(sessionID); err != nil {
+	if _, err := runtime.optionalCaller(sessionID); err != nil {
 		return Task{}, err
 	}
 	for _, dep := range dependsOn {
@@ -247,7 +247,7 @@ func (s *Sessions) DeleteTask(sessionID, taskID string) error {
 		return err
 	}
 	defer runtime.store.Close()
-	if _, err := runtime.caller(sessionID); err != nil {
+	if _, err := runtime.optionalCaller(sessionID); err != nil {
 		return err
 	}
 	deleted, err := runtime.store.DeleteTask(taskID)

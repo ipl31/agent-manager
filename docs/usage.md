@@ -213,9 +213,24 @@ Every session of an MCP-capable tool carries the agent-manager MCP server on spa
 
 `create_session` gives an agent the same spawn the `n` form gives a human: a name, a CLI, a group, a working directory, a first prompt and a worktree choice. A session created this way is a normal row in the list, and the manager picks it up on its next poll, so it attaches, revives, forks and reviews like any other.
 
-Each field falls back the way the form does. The CLI defaults to the one the calling agent runs, the group and directory default to the caller's, an explicit group uses that group's nearest inherited default path, and an explicit directory wins over both. A name is the agent's to choose and should describe the work; leaving it empty generates a placeholder and asks the new session to rename itself, exactly as a promptless spawn from the form does. Passing `worktree: true` adds a git worktree and branch off the directory's repo, which is what keeps several agents working in one project from editing the same checkout; omitting it inherits the group's default, then the global setting.
+With a calling session, the CLI, group and directory inherit from it; an explicit group uses that group's nearest inherited default path, and an explicit directory wins. Without a calling session, the CLI uses the enabled default from Settings, the group is the root, and the directory is the selected group's inherited path or the shell's working directory. A name is the agent's to choose and should describe the work; leaving it empty generates a placeholder and asks the new session to rename itself, exactly as a promptless spawn from the form does. Passing `worktree: true` adds a git worktree and branch off the directory's repo, which is what keeps several agents working in one project from editing the same checkout; omitting it inherits the group's default, then the global setting.
 
 `read_session` returns the target's current screen, and its last captured screen once the session has stopped. `kill_session` ends the process and leaves the row dead with its last screen, `revive_session` brings it back on the conversation it held, and `archive_session` files a finished row away or restores it. An agent that quit while its window stayed open is relaunched inside that pane, so the row keeps the screen its last life left there.
+
+### Commands from outside the manager
+
+A script in a plain shell, cron job, or CI step can use the session, group, and shared task commands without `AGENT_MANAGER_SESSION_ID`. The new row appears in the manager when it is open; spawning also works while the manager is closed. Status polling and queued message delivery resume when the manager opens. For example, from a git repo with an existing `sprint` group:
+
+```sh
+agent-manager spawn --name ticket-521 --prompt "Implement ticket 521" \
+  --tool claude --group sprint --directory "$PWD" --worktree --json
+```
+
+An MCP server started outside a managed session can use the same caller-free workspace tools. Its session-owned tools still need a managed caller.
+
+When a command needs to act as a particular session, pass `--as` to that command: `agent-manager spawn --as <session-id> --prompt "Continue the work"` inherits its CLI, group, and directory. The explicit id takes precedence over `AGENT_MANAGER_SESSION_ID`, the managed tmux pane, and process ancestry. `task claim`, `task finish`, `task release`, `reserve`, `release-files`, rename, review, and terminal commands require a real caller; scripts can use `--as` with an existing id. An invalid or deleted id is an error.
+
+A caller-free `send` has no session to receive a reply, so its message can become delivered but never answered. External scripts share the anonymous sender identity: queue limits, deduplication, and pending delivery checks for `wait` apply across them. Use `--as` for session-specific tracking. `message-status` shows only messages sent under the same caller identity.
 
 ### Messages between agents
 
@@ -249,7 +264,7 @@ Every one of these tools acts on the user's machine. Agents should treat `send_t
 
 Registration is per tool. Claude gets a generated `--mcp-config` file. Codex gets `-c mcp_servers...` overrides. OpenCode gets an `OPENCODE_CONFIG` merge file. Grok, Gemini, and Command Code each get a one-time `mcp add --scope user` entry on their first launch. Muse has no command that adds a server, so its first launch writes the entry into Muse's own settings file (see [Configuration](configuration.md#agent-clis)). Hermes gets its own one-time `mcp add` flow, which needs the MCP SDK its installer treats as optional: a Hermes still missing it refuses the spawn with a dialog offering the `pip install mcp` line for the Python that runs Hermes, read from `hermes --version`, so a Hermes session always carries these tools. A spawn whose CLI is not on PATH is refused the same way, with the vendor's portable installer for a built-in agent, or the package manager on this machine for anything else. When that command is the vendor's installer, `c` copies it and `i` runs it in a shell tab named after the CLI, where you can watch it and answer its prompts; when it exits 0 and puts the CLI on PATH the refused spawn goes ahead on its own, and a failure, or an installer that leaves the CLI somewhere PATH does not name, leaves the tab open with the output and the reason on the status line. A package-manager line stays a suggestion to read, since the package that carries a tool's name is yours to choose. The dialog also hands the mouse back to the terminal while it is up, so a drag over the command selects it.
 
-Pi does not include an MCP client. Its sessions reach the same workspace through the subcommands: `agent-manager --help` lists them, from `sessions`, `spawn`, `send` and `wait` to the shared task list, file reservations, terminals and the review declarations. `update` needs no caller at all, and `issue` and `feature` use only the session id the launch exported. Every other subcommand acts as the session or terminal it runs in, resolved from that environment or, for a [terminal tab](#terminal-tabs) that has none, from the tmux pane, so the same subcommands work from a shell you opened with `T`.
+Pi does not include an MCP client. Its sessions reach the same workspace through the subcommands: `agent-manager --help` lists them, from `sessions`, `spawn`, `send` and `wait` to the shared task list, file reservations, terminals and the review declarations. `update` needs no caller at all, and `issue` and `feature` use only the session id the launch exported. Commands acting as a session resolve it from `--as`, the environment, the managed tmux pane, or process ancestry; workspace commands also work without one, as described above.
 
 ### Bugs and ideas
 

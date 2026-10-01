@@ -10,9 +10,9 @@ import (
 )
 
 const (
-	usageReserve      = "reserve <path>... [--mode exclusive|shared] [--note <text>] [--ttl <duration>] [--json]"
-	usageReleaseFiles = "release-files [<path>...] [--json]"
-	usageReservations = "reservations [--json]"
+	usageReserve      = "reserve <path>... [--mode exclusive|shared] [--note <text>] [--ttl <duration>] [--json] [--as <session-id>]"
+	usageReleaseFiles = "release-files [<path>...] [--json] [--as <session-id>]"
+	usageReservations = "reservations [--json] [--as <session-id>]"
 )
 
 type fileCommands interface {
@@ -42,6 +42,7 @@ type releasedCount struct {
 
 func runReserve(out io.Writer, files fileCommands, args []string, sessionID string) error {
 	set := newFlagSet(usageReserve)
+	callerFlag(set, &sessionID)
 	mode := set.String("mode", "", "exclusive (default) means nobody else should edit these paths; shared means others may too")
 	note := set.String("note", "", "what you are doing there, so a conflicting agent knows what it is up against")
 	ttl := set.Duration("ttl", 0, "how long the lease lasts before it lapses, default "+sessioncmd.DefaultReservationTTL.String()+", maximum "+sessioncmd.MaxReservationTTL.String())
@@ -62,6 +63,7 @@ func runReserve(out io.Writer, files fileCommands, args []string, sessionID stri
 
 func runReleaseFiles(out io.Writer, files fileCommands, args []string, sessionID string) error {
 	set := newFlagSet(usageReleaseFiles)
+	callerFlag(set, &sessionID)
 	asJSON := jsonFlag(set)
 	operands, err := parseCommand(out, set, args, 0, anyNumber)
 	if err != nil {
@@ -79,6 +81,7 @@ func runReleaseFiles(out io.Writer, files fileCommands, args []string, sessionID
 
 func runReservations(out io.Writer, files fileCommands, args []string, sessionID string) error {
 	set := newFlagSet(usageReservations)
+	callerFlag(set, &sessionID)
 	asJSON := jsonFlag(set)
 	if _, err := parseCommand(out, set, args, 0, 0); err != nil {
 		return err
