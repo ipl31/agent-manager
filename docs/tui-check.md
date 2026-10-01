@@ -13,8 +13,8 @@ go run ./cmd/tui-check -current-home live
 ```
 
 `quick` replays the pane corpus, fuzz seeds, selected session and UI regressions,
-and the real tmux paste and submit contract.
-`fuzz` runs six bounded Go fuzz targets with two workers, for 5 seconds per
+and the real tmux paste, bracketed paste, and submit contracts.
+`fuzz` runs seven bounded Go fuzz targets with two workers, for 5 seconds per
 target by default. A failure is reproducible with the command Go prints;
 commit a minimized failing input or a named regression fixture. The fast tests
 do not need network access or agent accounts. Both modes give tmux a short,
@@ -41,8 +41,8 @@ needs a real managed-session check before claiming live compatibility.
 The corpus lists every built-in tool from `config.Default`, including the
 shell. It checks status and selected reply, echo, and draft behavior. The two
 status fuzz targets mutate bounded pane content and probe all parser APIs.
-UI targets generate short selection, scroll, and watcher sequences and verify
-key-byte encoding. Session targets check candidate ordering, recapture
+UI targets generate short selection, scroll, watcher, and status-poll sequences
+and verify key-byte encoding. Session targets check candidate ordering, recapture
 snapshots, and OpenCode metadata parser stability. The tmux test verifies a
 paste longer than 1024 bytes lands intact in pane 0 while pane 1 is active,
 then checks that `SendText` submits only after the message bytes. Discovery

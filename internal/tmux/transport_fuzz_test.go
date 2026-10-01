@@ -29,6 +29,9 @@ func TestPasteKeepsBytesAndTargetsPaneZero(t *testing.T) {
 	if err := driver.SendCommand("select-pane", "-t", windowTarget(id)+".1"); err != nil {
 		t.Fatal(err)
 	}
+	if err := driver.Resize(id, 60, 20); err != nil {
+		t.Fatal(err)
+	}
 	text := strings.Repeat("quoted ' text ☃\nsecond line\t", 60)
 	// tmux sends an LF as the terminal's Enter byte (CR) to a raw pty.
 	want := strings.ReplaceAll(text, "\n", "\r")
@@ -57,6 +60,44 @@ func TestPasteKeepsBytesAndTargetsPaneZero(t *testing.T) {
 	}
 	got, _ := os.ReadFile(received)
 	t.Fatalf("pane 0 received %d/%d bytes before deadline", len(got), len(want))
+}
+
+func TestBracketedPasteKeepsBoundaries(t *testing.T) {
+	driver := requireTmux(t)
+	id := "bracketed"
+	received := t.TempDir() + "/received"
+	command := "stty raw -echo; printf '\\033[?2004hREADY_FOR_PASTE'; cat > " + ShellQuote(received)
+	if err := driver.Create(id, t.TempDir(), command, nil, 80, 24); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = driver.Kill(id) })
+	if err := awaitPaneContains(driver, id, "READY_FOR_PASTE", 3*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	text := "first line\nsecond ☃"
+	if err := driver.Paste(id, text); err != nil {
+		t.Fatal(err)
+	}
+	want := "\x1b[200~" + strings.ReplaceAll(text, "\n", "\r") + "\x1b[201~"
+	if err := awaitFile(received, want, 3*time.Second); err != nil {
+		got, _ := os.ReadFile(received)
+		t.Fatalf("bracketed paste: %v; got %q", err, got)
+	}
+}
+
+func awaitPaneContains(driver *Driver, id, want string, limit time.Duration) error {
+	deadline := time.Now().Add(limit)
+	for time.Now().Before(deadline) {
+		pane, err := driver.CapturePane(id)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(pane, want) {
+			return nil
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return fmt.Errorf("pane %s did not draw %q before deadline", id, want)
 }
 
 func awaitFile(path, want string, limit time.Duration) error {

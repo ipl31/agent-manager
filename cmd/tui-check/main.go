@@ -49,12 +49,13 @@ func main() {
 	var err error
 	switch flag.Arg(0) {
 	case "quick":
-		err = runGo(goBinary, "test", "./internal/status", "./internal/tmux", "./internal/ui", "./internal/agentsession", "./internal/sessioncmd", "-run", "^TestPaneCorpus$|^TestPasteKeepsBytesAndTargetsPaneZero$|^TestFocusKeyCommand$|^TestMouseReportEncodings$|^TestFocusPasteKeepsPromptInComposer$|^TestPendingInputLandsOnAnErroredPane$|^TestCaptureAgentSessionIDs|^TestSnapshotRelaunch|^FuzzPane|^FuzzFocusPreviewTrace$|^FuzzFocusKeyBytes$|^FuzzSessionCandidates$|^FuzzOpencodeExportParser$")
+		err = runGo(goBinary, "test", "./internal/status", "./internal/tmux", "./internal/ui", "./internal/agentsession", "./internal/sessioncmd", "-run", "^TestPaneCorpus$|^TestPasteKeepsBytesAndTargetsPaneZero$|^TestBracketedPasteKeepsBoundaries$|^TestFocusKeyCommand$|^TestMouseReportEncodings$|^TestFocusPasteKeepsPromptInComposer$|^TestPendingInputLandsOnAnErroredPane$|^TestCaptureAgentSessionIDs|^TestSnapshotRelaunch|^FuzzPane|^FuzzFocusPreviewTrace$|^FuzzPollerStatusTrace$|^FuzzFocusKeyBytes$|^FuzzSessionCandidates$|^FuzzOpencodeExportParser$")
 	case "fuzz":
 		for _, target := range []struct{ pkg, name string }{
 			{"./internal/status", "FuzzPaneDraftIsolation"},
 			{"./internal/status", "FuzzPaneRobustness"},
 			{"./internal/ui", "FuzzFocusPreviewTrace"},
+			{"./internal/ui", "FuzzPollerStatusTrace"},
 			{"./internal/ui", "FuzzFocusKeyBytes"},
 			{"./internal/agentsession", "FuzzSessionCandidates"},
 			{"./internal/agentsession", "FuzzOpencodeExportParser"},
