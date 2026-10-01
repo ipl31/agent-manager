@@ -28,3 +28,38 @@ func TestCodexQueuedFollowUpKeepsWorkingStatus(t *testing.T) {
 		t.Fatalf("LastMessage = %q, ok=%t; want current reply", got, ok)
 	}
 }
+
+func TestCodexLiveTurnScreens(t *testing.T) {
+	engine := defaultEngine(t)
+	for _, width := range []struct {
+		name, prompt, heading string
+	}{
+		{"wide", "› Run the shell command sleep 18, then reply with exactly LIVE_SECOND.", "• Messages to be submitted after next tool call (press esc to interrupt and send immediately)"},
+		{"narrow", "› Run the shell command sleep 18, then reply with exactly\n  LIVE_SECOND.", "• Messages to be submitted after next tool call (press esc\n  to interrupt and send immediately)"},
+	} {
+		t.Run(width.name, func(t *testing.T) {
+			baseline := "› Reply with exactly LIVE_BASELINE and nothing else.\n\n" +
+				"• LIVE_BASELINE\n\n  Worked for 7s • 00:34\n\n"
+			working := baseline + width.prompt + "\n\n• Working (0s • esc to interrupt)\n\n"
+			queued := working + width.heading + "\n  ↳ After that, reply with exactly LIVE_QUEUED.\n\n"
+			for _, screen := range []struct{ name, pane, state string }{
+				{"baseline", baseline, Finished},
+				{"working", working, Working},
+				{"queued", queued, Working},
+			} {
+				t.Run(screen.name, func(t *testing.T) {
+					pane := screen.pane + "› Ask Codex to do anything\n"
+					if got, matched := engine.Match("codex", pane); !matched || got != screen.state {
+						t.Errorf("Match = %q, matched=%t; want %q", got, matched, screen.state)
+					}
+					if got, _, ok := engine.LastMessage("codex", pane); !ok || got != "LIVE_BASELINE" {
+						t.Errorf("LastMessage = %q, ok=%t; want LIVE_BASELINE", got, ok)
+					}
+					if got, _, ok := engine.FullTurnText("codex", pane); !ok || got != "• LIVE_BASELINE" {
+						t.Errorf("FullTurnText = %q, ok=%t; want only baseline reply", got, ok)
+					}
+				})
+			}
+		})
+	}
+}
