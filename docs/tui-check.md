@@ -52,9 +52,10 @@ time is explicit so it can be run often.
 
 The standalone `am/tui-fuzzer` branch deliberately leaves production status
 code at its `origin/main` base (`87569e4`). `quick` currently fails on
-`codex-working-draft` and `codex-queued-followup`. The first
-`FuzzPaneDraftIsolation` seeds fail for the same reply bug. Those failures
-detect two Codex defects, not test setup failures. `fuzz` continues to the other targets and reports all
-failures at the end. The separate `fix/codex-queued-status-reply` branch carries
-the production changes and focused regressions. With both branches applied,
-the corpus and fuzz seeds pass.
+`codex-working-draft`, `codex-queued-followup`, and the live Codex 0.159.3
+turns captured at 100 and 60 columns. The first `FuzzPaneDraftIsolation`
+seeds fail for the same reply bug. These failures detect Codex status and reply
+defects. `fuzz` continues to the other targets and reports all failures at the
+end. The separate `fix/codex-queued-status-reply` branch carries the production
+changes and focused regressions. With both branches applied, the corpus and
+fuzz seeds pass.
