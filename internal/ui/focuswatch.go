@@ -29,6 +29,7 @@ type focusPreviewMsg struct {
 	paneMouse   bool
 	paneMotion  bool
 	paneSGR     bool
+	paneAlt     bool
 	historySize int
 }
 
@@ -246,7 +247,7 @@ func (w *focusWatch) watch(id string, stop chan struct{}) {
 		// back as its default status message instead of coordinates.
 		if state, err := control.Command(
 			`display-message -p -t ` + target +
-				` "#{cursor_x},#{cursor_y},#{cursor_flag},#{mouse_any_flag}#{mouse_button_flag}#{mouse_standard_flag},#{history_size},#{mouse_all_flag},#{mouse_sgr_flag}"`); err == nil {
+				` "#{cursor_x},#{cursor_y},#{cursor_flag},#{mouse_any_flag}#{mouse_button_flag}#{mouse_standard_flag},#{history_size},#{mouse_all_flag},#{mouse_sgr_flag},#{alternate_on}"`); err == nil {
 			applyPaneState(&msg, state)
 		}
 		// Skip the send once stopped: it could block on the UI loop for
@@ -322,7 +323,7 @@ func matchExecShape(pane string) string {
 // default status text when it does not receive the format expression.
 func applyPaneState(msg *focusPreviewMsg, reply string) {
 	parts := strings.Split(strings.TrimSpace(reply), ",")
-	if len(parts) != 7 {
+	if len(parts) != 8 {
 		return
 	}
 	x, errX := strconv.Atoi(strings.TrimSpace(parts[0]))
@@ -340,4 +341,5 @@ func applyPaneState(msg *focusPreviewMsg, reply string) {
 	}
 	msg.paneMotion = strings.TrimSpace(parts[5]) == "1"
 	msg.paneSGR = strings.TrimSpace(parts[6]) == "1"
+	msg.paneAlt = strings.TrimSpace(parts[7]) == "1"
 }
