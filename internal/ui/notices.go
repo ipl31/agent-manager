@@ -920,6 +920,7 @@ func (m *Model) welcomeBody() []string {
 		body = append(body, keyMap+".")
 	}
 	return append(body,
+		"Settings ("+settings+") → symbols switches Compatible / Advanced marks.",
 		"A bug or an idea? Settings ("+settings+") has a row for each.",
 		"Messages like this one live here; x dismisses one for good.",
 	)
