@@ -1,0 +1,6 @@
+Compatible navigation visual evidence for issue #628
+
+Before: 9f3de54c, /tmp/am628-nav/before-live2/help.txt
+After: 566bc42a, /tmp/am628-nav/after-live/help.txt
+
+These PNGs render actual isolated Linux/tmux frame captures in DejaVu Sans Mono. They demonstrate the displayed navigation labels and layout, not native terminal/font coverage. Actual Codex was running at its unauthenticated sign-in screen in each disposable environment. Source captures contain only the disposable fixture.
