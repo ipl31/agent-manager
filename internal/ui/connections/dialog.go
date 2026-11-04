@@ -167,9 +167,10 @@ type DialogView struct {
 }
 
 func (d *Dialog) View(view DialogView) uidialogs.Card {
-	title := "⇄ New SSH Connection"
+	mark := presentation.GlyphsFor(view.GlyphMode).MoveGlyph
+	title := mark + " New SSH Connection"
 	if d.editing != "" {
-		title = "⇄ Edit SSH Connection"
+		title = mark + " Edit SSH Connection"
 	}
 	body := view.Field("name", view.Input(d.name), d.focus == NameField) +
 		view.Field("ssh to", view.Input(d.destination), d.focus == DestinationField) +
