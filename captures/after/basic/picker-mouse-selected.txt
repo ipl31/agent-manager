@@ -1,0 +1,30 @@
+  review · glyph-check  s  commit   u  split   r  repo   B  main -> feature (auto)   L  2/3 9…0 files · +0 −0
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+█                            │
+█ commits  2/3               │  Diff
+█  + 5b2ea9c one             │
+█ │. 94f9a3e two             │
+█  + 4ec6f92 …○ ✔ ▎ ⇄ HEAD   │
+█                            │
+█ files                      │
+█ | loading diff             │
+█                            │
+█                            │                                   :   *   .
+█                            │                                   .       .
+█                            │                                   .       .
+█                            │                                   .       .
+█                            │                                   .   .   .
+█                            │                                  loading diff
+█                            │
+█                            │
+█                            │
+█                            │
+█                            │
+█                            │
+█                            │
+█                            │
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+   Review    c comment  d remove/handle  C send  space reviewed  A all reviewed  s scope: commit  r repo: repo
+             b branch  B target  L commit  [/] older/newer  {/} oldest/newest
+  Move       up/down/jk scroll line · ctrl+d/ctrl+u half page · pgup/pgdn page · g/G top/bottom …

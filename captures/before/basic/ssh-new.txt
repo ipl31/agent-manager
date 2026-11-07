@@ -1,0 +1,30 @@
+
+
+
+
+
+
+
+
+                       +── ⇄ New SSH Connection ──────────────────────────────────────+
+                       │                                                              │
+                       │   > name          > build-box                                │
+                       │     ssh to        > user@host or an ~/.ssh/config alias      │
+                       │     binary        > found on the login PATH                  │
+                       │                                                              │
+                       │     Its sessions show under this name. The host needs age…   │
+                       │     its login PATH or at the binary path (/… or ~/…), and…   │
+                       │     machine's ssh can use without a prompt.                  │
+                       │                                                              │
+                       ├──────────────────────────────────────────────────────────────┤
+                       │   tab/up/down move  enter save  esc cancel                   │
+                       +──────────────────────────────────────────────────────────────+
+
+
+
+
+
+
+
+
+
