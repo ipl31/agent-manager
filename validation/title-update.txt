@@ -1,0 +1,6 @@
+Head ce97aec0, rebased and squashed to one commit on main 12cf06d3.
+Compatible SSH titles and all review-picker titles now omit decorative letter prefixes. Advanced/default symbols are preserved.
+Targeted race tests pass for dialogs, commit picker/marks and root review adapters. Build, vet, staticcheck, formatting and architecture checks pass.
+Live Codex sign-in sessions in both modes pass SSH New/Edit title, commit picker/rail, keyboard and mouse selection and review marking checks.
+Astra reviewed the update and found no actionable regressions. Local CodeRabbit review was waived by the user.
+Earlier full-suite failure and native-platform/font verification gaps remain as documented in the draft PR.

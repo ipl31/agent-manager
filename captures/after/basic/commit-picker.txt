@@ -7,13 +7,13 @@
 
 
 
-                       +── D Review commit ───────────────────────────────────────────+
+                       +── Review commit ─────────────────────────────────────────────+
                        │                                                              │
                        │   filter:                                                    │
                        │                                                              │
-                       │     . 4ec6f92 literal ○ ✔ ▎ ⇄ (HEAD)                         │
-                       │     . 94f9a3e two                                            │
-                       │   > + 5b2ea9c one                                            │
+                       │     . 1bdfa3c literal ○ ✔ ▎ ⇄ (HEAD)                         │
+                       │     . f7eaa57 two                                            │
+                       │   > + d4082a1 one                                            │
                        │                                                              │
                        ├──────────────────────────────────────────────────────────────┤
                        │   type filter  up/down pick  enter select  esc cancel        │

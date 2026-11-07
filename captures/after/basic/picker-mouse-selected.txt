@@ -1,20 +1,20 @@
-  review · glyph-check  s  commit   u  split   r  repo   B  main -> feature (auto)   L  2/3 9…0 files · +0 −0
+  review · glyph-check  s  commit   u  split   r  repo   B  main -> feature (auto)   L  2/3 f…1 files · +1 −0
 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
 █                            │
-█ commits  2/3               │  Diff
-█  + 5b2ea9c one             │
-█ │. 94f9a3e two             │
-█  + 4ec6f92 …○ ✔ ▎ ⇄ HEAD   │
+█ commits  2/3               │  file.go
+█  + d4082a1 one             │    1 package fixture                  │  1 package fixture
+█ │. f7eaa57 two             │    2 // change 0                      │  2 // change 0
+█  + 1bdfa3c …○ ✔ ▎ ⇄ HEAD   │   ·                                   │  3 // change 1
 █                            │
 █ files                      │
-█ | loading diff             │
+█ │. file.go         +1 −0   │
 █                            │
-█                            │                                   :   *   .
-█                            │                                   .       .
-█                            │                                   .       .
-█                            │                                   .       .
-█                            │                                   .   .   .
-█                            │                                  loading diff
+█                            │
+█                            │
+█                            │
+█                            │
+█                            │
+█                            │
 █                            │
 █                            │
 █                            │

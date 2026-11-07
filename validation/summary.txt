@@ -1,7 +1,7 @@
-Head cb1c990d; upstream main 12cf06d3.
+Original validation: head cb1c990d; upstream main 12cf06d3. See title-update.txt for the final ce97aec0 title cleanup and targeted revalidation.
 Build, gofmt, vet, staticcheck 2026.2.2, three architecture checks and all six release cross-builds passed.
 Full isolated race suite passed all packages except internal/sessioncmd. The failing revive test reproduces on clean main; logs retained here. Root UI passed in 223.238s, connections in 1.210s, review in 1.364s.
 Real Codex sign-in sessions passed both glyph modes; SSH New/Edit titles, commit rail/picker, keyboard/mouse selection and mouse marking checked.
 Real-terminal smoke, 27 Python harness tests, and both-mode dialog scenarios passed. First Advanced dialog run failed archive confirmation after selecting a root row; fresh-profile retry passed.
 Native macOS/Windows/WSL2, SSH terminals, tmux 3.1 and full default-font matrix are not verified on this Linux host.
-CodeRabbit review is pending user authentication. No PR has been opened.
+User waived local CodeRabbit review. Draft PR #1026 is open; Astra architecture review and follow-up review found no actionable defects.

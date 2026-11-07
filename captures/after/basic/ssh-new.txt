@@ -6,7 +6,7 @@
 
 
 
-                       +── M New SSH Connection ──────────────────────────────────────+
+                       +── New SSH Connection ────────────────────────────────────────+
                        │                                                              │
                        │   > name          > build-box                                │
                        │     ssh to        > user@host or an ~/.ssh/config alias      │

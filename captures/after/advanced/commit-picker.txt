@@ -11,9 +11,9 @@
                        │                                                              │
                        │   filter:                                                    │
                        │                                                              │
-                       │     ○ eef4331 literal ○ ✔ ▎ ⇄ (HEAD)                         │
-                       │     ○ b371a09 two                                            │
-                       │   ❯ ✔ 35fda69 one                                            │
+                       │     ○ d079839 literal ○ ✔ ▎ ⇄ (HEAD)                         │
+                       │     ○ 92f694b two                                            │
+                       │   ❯ ✔ d1c4a36 one                                            │
                        │                                                              │
                        ├──────────────────────────────────────────────────────────────┤
                        │   type filter  ↑↓ pick  ↵ select  esc cancel                 │

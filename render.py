@@ -9,7 +9,7 @@ frames=[('SSH connection title','ssh-new.txt',None),('Commit rail: reviewed and 
 for stage in ('before','after'):
  panels=[]
  for label,name,crop in frames:
-  lines=(Path(f'/tmp/am628-{stage}-nov7-basic')/name).read_text().splitlines()
+  lines=(Path('/tmp/am628-before-nov7-basic' if stage=='before' else '/tmp/am628-after-title-basic')/name).read_text().splitlines()
   if crop: lines=lines[slice(*crop)]
   else:
    while lines and not lines[0].strip():lines.pop(0)
@@ -29,6 +29,6 @@ for stage in ('before','after'):
   y+=10
  im.save(out/f'{stage}.png')
 fonts=TTFont(font_path).getBestCmap()
-assert all(ord(c) in fonts for c in 'M.+│')
-(out/'README.txt').write_text('Before: upstream/main 12cf06d3. After: cb1c990d.\nImages render unmodified plain capture-pane text from real manager runs in Compatible mode. Panels crop blank rows and the lower diff pane; no product text is replaced. These are rendered capture evidence, not native terminal screenshots or a cross-platform font audit.\nReal Codex sign-in sessions were used with disposable HOME/config and explicit isolated tmux sockets.\nKeyboard and mouse picker selection and review marking passed in Basic and Advanced. New/Edit SSH titles and literal Unicode text were checked in both modes.\nDejaVu Sans Mono contains the selected replacement characters M, ., +, and │.\n')
+assert all(ord(c) in fonts for c in '.+│')
+(out/'README.txt').write_text('Before: upstream/main 12cf06d3. After: ce97aec0.\nImages render unmodified plain capture-pane text from real manager runs in Compatible mode. Panels crop blank rows and the lower diff pane; no product text is replaced. These are rendered capture evidence, not native terminal screenshots or a cross-platform font audit.\nReal Codex sign-in sessions were used with disposable HOME/config and explicit isolated tmux sockets.\nKeyboard and mouse picker selection and review marking passed in Basic and Advanced. New/Edit SSH titles and literal Unicode text were checked in both modes.\nDejaVu Sans Mono contains the selected replacement characters ., +, and │; Compatible titles have no decorative prefix.\n')
 print(out)

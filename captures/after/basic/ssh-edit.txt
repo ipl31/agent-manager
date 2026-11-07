@@ -6,7 +6,7 @@
 
 
 
-                       +── M Edit SSH Connection ─────────────────────────────────────+
+                       +── Edit SSH Connection ───────────────────────────────────────+
                        │                                                              │
                        │   > name          > literal-⇄                                │
                        │     ssh to        > fixture@127.0.0.1                        │
