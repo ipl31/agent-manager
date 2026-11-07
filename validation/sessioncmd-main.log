@@ -1,0 +1,5 @@
+--- FAIL: TestReviveReadsTheConversationAQuitAgentLogged (0.38s)
+    session_lifecycle_test.go:325: the launch ended before its row's creation time
+FAIL
+FAIL	github.com/YoanWai/agent-manager/internal/sessioncmd	93.861s
+FAIL

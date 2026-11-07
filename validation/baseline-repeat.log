@@ -1,0 +1,17 @@
+--- FAIL: TestReviveReadsTheConversationAQuitAgentLogged (0.51s)
+    session_lifecycle_test.go:325: the launch ended before its row's creation time
+--- FAIL: TestReviveReadsTheConversationAQuitAgentLogged (0.49s)
+    session_lifecycle_test.go:325: the launch ended before its row's creation time
+--- FAIL: TestReviveReadsTheConversationAQuitAgentLogged (0.44s)
+    session_lifecycle_test.go:325: the launch ended before its row's creation time
+--- FAIL: TestReviveReadsTheConversationAQuitAgentLogged (3.60s)
+    session_lifecycle_test.go:337: session never showed "resumed conv-logged": output="started\nagent-manager: agent exited - revive it in Agent Manager to relaunch it here.\n$ exec '/usr/bin/sh' '/tmp/am-relaunch-c014cb82-4103360296.sh'\nstarted\nagent-manager: agent exited - revive it in Agent Manager to relaunch it here.\n$" err=<nil>
+--- FAIL: TestReviveReadsTheConversationAQuitAgentLogged (0.48s)
+    session_lifecycle_test.go:325: the launch ended before its row's creation time
+--- FAIL: TestReviveReadsTheConversationAQuitAgentLogged (3.61s)
+    session_lifecycle_test.go:337: session never showed "resumed conv-logged": output="started\nagent-manager: agent exited - revive it in Agent Manager to relaunch it here.\n$ exec '/usr/bin/sh' '/tmp/am-relaunch-4d91a93c-1361690490.sh'\nstarted\nagent-manager: agent exited - revive it in Agent Manager to relaunch it here.\n$" err=<nil>
+--- FAIL: TestReviveReadsTheConversationAQuitAgentLogged (0.48s)
+    session_lifecycle_test.go:325: the launch ended before its row's creation time
+FAIL
+FAIL	github.com/YoanWai/agent-manager/internal/sessioncmd	11.773s
+FAIL
