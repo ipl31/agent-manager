@@ -100,7 +100,7 @@ func TestSetLabelNeutralizesFormatStrings(t *testing.T) {
 	t.Cleanup(func() { driver.Kill(id) })
 
 	marker := "/tmp/am-injection-" + id
-	label := "evil #(touch " + marker + ") ; café\n"
+	label := "evil #(touch " + marker + ") ; ca\nfé"
 	if err := driver.SetLabel(id, label); err != nil {
 		t.Fatalf("SetLabel: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestSetLabelNeutralizesFormatStrings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("display-message: %v", err)
 	}
-	if got, want := strings.TrimSpace(string(rendered)), strings.TrimSpace(label); got != want {
+	if got, want := strings.TrimSpace(string(rendered)), "evil #(touch "+marker+") ; café"; got != want {
 		t.Fatalf("label should render literally without control characters, got %q, want %q", got, want)
 	}
 	time.Sleep(200 * time.Millisecond)
