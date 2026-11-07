@@ -1,0 +1,4 @@
+Head fbb7f9ae, still one commit on upstream/main 12cf06d3.
+GitHub CI exposed a retained-repo-picker test still expecting the removed decorative D prefix. Updated its expected full title for Basic and Advanced; no production rendering changes from ce97aec0.
+Full affected-package race run passes: env -u TMUX SHELL=/bin/sh TMUX_TMPDIR=/tmp/am1026ui go test -race -count=1 -p 1 ./internal/ui ./internal/ui/connections ./internal/ui/review. Root UI 200.325s, connections 1.206s, review 1.354s.
+CodeRabbit was explicitly requested on GitHub; as of 2026-11-07 20:12 UTC it has not acknowledged or posted feedback.

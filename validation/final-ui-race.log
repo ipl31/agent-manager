@@ -1,0 +1,3 @@
+ok  	github.com/YoanWai/agent-manager/internal/ui	200.325s
+ok  	github.com/YoanWai/agent-manager/internal/ui/connections	1.206s
+ok  	github.com/YoanWai/agent-manager/internal/ui/review	1.354s
