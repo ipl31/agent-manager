@@ -48,10 +48,22 @@ func TestFullFocusFrameRecordsNoRailHits(t *testing.T) {
 	t.Parallel()
 	m := buildModel(t)
 	createSession(t, m, "alpha", t.TempDir(), "")
+	// No displayed age can advance while real tmux effects drain.
+	for i := range m.workspace.sessions {
+		m.workspace.sessions[i].CreatedAt = time.Time{}
+		m.workspace.sessions[i].LastStatusAt = time.Time{}
+	}
+	m.rebuildRows()
 	m.selectSessionRow(t, "alpha")
 	preparedView(m)
 	if len(m.layout.displayedRail.Hits()) == 0 {
 		t.Fatal("test setup: the list frame should record the rail's hits")
+	}
+
+	warm := m.layout.displayedRail
+	preparedView(m)
+	if &warm.Lines[0] != &m.layout.displayedRail.Lines[0] {
+		t.Fatal("unchanged list did not reuse the warmed rail")
 	}
 
 	m.prefs.fullLayout = true
@@ -64,6 +76,40 @@ func TestFullFocusFrameRecordsNoRailHits(t *testing.T) {
 	preparedView(m)
 	if len(m.layout.displayedRail.Hits()) != 0 {
 		t.Fatalf("full focus paints no rail, got %d hits", len(m.layout.displayedRail.Hits()))
+	}
+	m.leaveFocus()
+	m.prefs.fullLayout = false
+	preparedView(m)
+	if len(m.layout.displayedRail.Hits()) == 0 {
+		t.Fatal("leaving full focus did not restore rail hits")
+	}
+	if &warm.Lines[0] != &m.layout.displayedRail.Lines[0] {
+		t.Fatal("reentry did not restore the cached rail frame")
+	}
+	reentry := m.layout.displayedRail
+	selected, ok := m.selected()
+	if !ok {
+		t.Fatal("reentry has no selected session")
+	}
+	x, ok := reentry.Handles["s:"+selected.ID]
+	if !ok {
+		t.Fatal("restored frame has no session handle")
+	}
+	lineY := -1
+	for i, line := range reentry.Lines {
+		if line.HitOK && line.Hit.SessionID == selected.ID {
+			lineY = i
+			break
+		}
+	}
+	if lineY < 0 {
+		t.Fatal("restored frame has no session hit")
+	}
+	y0, _ := m.bodyYRange()
+	updated, _ = m.handleMouse(tea.MouseMsg{X: x, Y: y0 + lineY, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	m = updated.(*Model)
+	if selected, ok := m.selected(); !m.onList() || !m.rail.Reordering() || !ok || selected.Name != "alpha" {
+		t.Fatal("restored frame's handle did not lift its displayed session")
 	}
 }
 

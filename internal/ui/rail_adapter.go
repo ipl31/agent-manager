@@ -248,7 +248,7 @@ func (m *Model) prepareRailFrame(width, height int) {
 		Rename:          rename,
 		Foot:            foot,
 	}
-	m.layout.displayedRail = m.rail.Render(ctx, m.layout.displayedRail)
+	m.layout.displayedRail = m.layout.railCache.Render(m.rail, ctx, m.layout.displayedRail)
 }
 
 func (m *Model) railTheme() uirail.Theme { return uitheme.Current() }

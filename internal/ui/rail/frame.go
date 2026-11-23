@@ -220,17 +220,21 @@ func splitLines(text string) []string {
 
 func oneLine(text string) string { return strings.Join(strings.Fields(text), " ") }
 
-func relSince(at time.Time) string {
-	d := time.Since(at)
+func relSinceAt(at, now time.Time) string {
+	value, unit := ageBucket(now.Sub(at))
+	return fmt.Sprintf("%d%c ago", value, unit)
+}
+
+func ageBucket(d time.Duration) (int, byte) {
 	switch {
 	case d < time.Minute:
-		return fmt.Sprintf("%ds ago", int(d.Seconds()/5)*5)
+		return int(d.Seconds()/5) * 5, 's'
 	case d < time.Hour:
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+		return int(d.Minutes()), 'm'
 	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
+		return int(d.Hours()), 'h'
 	default:
-		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+		return int(d.Hours() / 24), 'd'
 	}
 }
 

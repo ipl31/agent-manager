@@ -3,6 +3,7 @@ package rail
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/YoanWai/agent-manager/internal/keybind"
 	"github.com/YoanWai/agent-manager/internal/ui/presentation"
@@ -16,10 +17,16 @@ type renderer struct {
 	palette  palette
 	previous Frame
 	frame    Frame
+	now      time.Time
 }
 
 func (m Model) Render(ctx RenderContext, previous Frame) Frame {
+	return m.renderAt(ctx, previous, time.Now())
+}
+
+func (m Model) renderAt(ctx RenderContext, previous Frame, now time.Time) Frame {
 	r := renderer{
+		now:      now,
 		model:    m,
 		ctx:      ctx,
 		palette:  newPalette(ctx.Theme),
@@ -489,7 +496,7 @@ func (r renderer) renderSession(row treeRow, selected bool, width int, pad, guid
 	}
 	// A remote snapshot carries no times.
 	if !activity.IsZero() {
-		meta += metaStyle.Render(" · " + relSince(activity) + elsewhere)
+		meta += metaStyle.Render(" · " + relSinceAt(activity, r.now) + elsewhere)
 	}
 	if r.ctx.ComfortableRows {
 		indent := pad + trail + "  " + strings.Repeat(" ", ansi.StringWidth(handle))

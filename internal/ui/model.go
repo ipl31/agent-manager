@@ -80,6 +80,7 @@ type layoutState struct {
 	split         uigeometry.Gesture
 	panes         uigeometrypanes.Panes
 	displayedRail uirail.Frame
+	railCache     uirail.RenderCache
 	// card places the last card painted and its body, for clicks.
 	card cardRect
 	// keyHits are the key pairs this frame painted, for clicks.
