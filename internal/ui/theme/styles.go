@@ -1,9 +1,11 @@
 package theme
 
 import (
+	"strconv"
 	"sync/atomic"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 // themeStyles is every style derived from one palette. Apply builds a
@@ -64,18 +66,18 @@ func publishStyles(t Theme) *atomic.Pointer[themeStyles] {
 
 func newThemeStyles(t Theme) *themeStyles {
 	var (
-		bg       = lipgloss.Color(t.Bg)
-		surface  = lipgloss.Color(t.Surface)
-		bright   = lipgloss.Color(t.Bright)
-		text     = lipgloss.Color(t.Text)
-		dim      = lipgloss.Color(t.Dim)
-		subtle   = lipgloss.Color(t.Subtle)
-		accent   = lipgloss.Color(t.Accent)
-		accent2  = lipgloss.Color(t.Accent2)
-		working  = lipgloss.Color(t.Working)
-		finished = lipgloss.Color(t.Finished)
-		errored  = lipgloss.Color(t.Errored)
-		lead     = lipgloss.Color(Mix(t.Bg, t.Accent, 0.28))
+		bg       = completeColor(t.Bg)
+		surface  = completeColor(t.Surface)
+		bright   = completeColor(t.Bright)
+		text     = completeColor(t.Text)
+		dim      = completeColor(t.Dim)
+		subtle   = completeColor(t.Subtle)
+		accent   = completeColor(t.Accent)
+		accent2  = completeColor(t.Accent2)
+		working  = completeColor(t.Working)
+		finished = completeColor(t.Finished)
+		errored  = completeColor(t.Errored)
+		lead     = completeColor(Mix(t.Bg, t.Accent, 0.28))
 	)
 	return &themeStyles{
 		theme: t,
@@ -117,6 +119,17 @@ func newThemeStyles(t Theme) *themeStyles {
 		legendLabel: lipgloss.NewStyle().Foreground(text),
 		leadKey:     lipgloss.NewStyle().Foreground(accent).Background(lead).Bold(true).PaddingLeft(1),
 		leadLabel:   lipgloss.NewStyle().Foreground(bright).Background(lead).Padding(0, 1),
+	}
+}
+
+// Resolve both indexed profiles once, leaving profile selection to Render.
+func completeColor(hex string) lipgloss.CompleteColor {
+	indexed := termenv.ANSI256.Color(hex).(termenv.ANSI256Color)
+	basic := termenv.ANSI.Convert(indexed).(termenv.ANSIColor)
+	return lipgloss.CompleteColor{
+		TrueColor: hex,
+		ANSI256:   strconv.Itoa(int(indexed)),
+		ANSI:      strconv.Itoa(int(basic)),
 	}
 }
 
