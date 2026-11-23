@@ -10,6 +10,8 @@ import (
 	uisettings "github.com/YoanWai/agent-manager/internal/ui/settings"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+	"strings"
 	"testing"
 )
 
@@ -122,6 +124,51 @@ func TestNarrowListFooterKeepsConfiguredActionKeys(t *testing.T) {
 					m.handleKey(key)
 					check()
 				})
+			}
+		}
+	}
+}
+
+func TestListFooterKeepsPaneHeightAcrossSessionStatuses(t *testing.T) {
+	for _, glyph := range []presentation.GlyphMode{presentation.GlyphModeAdvanced, presentation.GlyphModeBasic} {
+		for _, width := range []int{10, 20, 40, 80, 120, 200, 256, 280, 320, 500} {
+			m := shotModel()
+			m.prefs.glyphMode = glyph
+			m.layout.width, m.layout.height = width, 67
+			m.selectSessionRow(t, "db-migrations")
+			want := -1
+			for _, state := range []string{"finished", "idle", "working", "waiting", "errored"} {
+				m.workspace.sessions[0].Status = state
+				m.rebuildRows()
+				height := m.previewPaneHeight()
+				if want < 0 {
+					want = height
+				}
+				if height != want {
+					t.Errorf("%s/%d/%s pane height=%d, want %d", glyph, width, state, height, want)
+				}
+			}
+		}
+	}
+}
+
+func TestWideListFooterKeepsRoomForThePreview(t *testing.T) {
+	for _, glyph := range []presentation.GlyphMode{presentation.GlyphModeAdvanced, presentation.GlyphModeBasic} {
+		for _, width := range []int{320, 500} {
+			for _, fullLayout := range []bool{false, true} {
+				m := shotModel()
+				m.prefs.glyphMode, m.prefs.fullLayout = glyph, fullLayout
+				m.layout.width, m.layout.height = width, 12
+				m.selectSessionRow(t, "db-migrations")
+				m.workspace.sessions[0].Status = "idle"
+				m.rebuildRows()
+				m.workspace.preview = "wide-preview-visible\n"
+				if got := lipgloss.Height(m.listFooter()); got != 2 {
+					t.Errorf("%s/%d/full=%t footer height=%d, want 2", glyph, width, fullLayout, got)
+				}
+				if !fullLayout && !strings.Contains(ansi.Strip(preparedView(m)), "wide-preview-visible") {
+					t.Errorf("%s/%d: footer hid the preview", glyph, width)
+				}
 			}
 		}
 	}
