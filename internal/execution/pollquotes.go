@@ -33,6 +33,17 @@ func isManagerEcho(line string) bool {
 	return false
 }
 
+type paneObservation struct {
+	raw, plain, message string
+	anchored, messageOK bool
+}
+
+func (p *Runner) observePane(tool, raw string) paneObservation {
+	plain := p.engine.Plain(tool, raw)
+	message, anchored, ok := p.engine.LastMessage(tool, plain)
+	return paneObservation{raw: raw, plain: plain, message: message, anchored: anchored, messageOK: ok}
+}
+
 // rowLines is what a full screen row shows for a session: the agent's
 // last message flattened to one line from its beginning, and the last
 // prompt sent to it. The visible pane is the first source; when an
@@ -41,9 +52,9 @@ func isManagerEcho(line string) bool {
 // it), and a deeper pane capture for everything else. pi and omp draw a
 // prompt with no marker at all, so theirs is read from their session file
 // every time.
-func (p *Runner) rowLines(ctx context.Context, sess store.Session, pane, dir string) (quote, prompt string) {
-	clean := p.engine.Plain(sess.Tool, pane)
-	quote, anchored, ok := p.engine.LastMessage(sess.Tool, clean)
+func (p *Runner) rowLines(ctx context.Context, sess store.Session, pane paneObservation, dir string) (quote, prompt string) {
+	clean := pane.plain
+	quote, anchored, ok := pane.message, pane.anchored, pane.messageOK
 	if !ok {
 		quote = lastMeaningfulPaneLine(clean)
 	}

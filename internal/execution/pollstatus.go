@@ -33,7 +33,7 @@ import (
 // a screen the rules misread: the acked session reads idle while the pane
 // still shows the screen it was waiting on, and any change to that screen
 // reads as waiting again, so a later prompt is never swallowed.
-func (p *Runner) derivePaneStatus(sess store.Session, pane string, agentAlive bool, paneHashes map[string]uint64) (string, error) {
+func (p *Runner) derivePaneStatus(sess store.Session, pane paneObservation, agentAlive bool, paneHashes map[string]uint64) (string, error) {
 	newStatus, err := p.paneVerdict(sess, pane, agentAlive, paneHashes)
 	if err != nil || newStatus != status.Waiting {
 		delete(p.waitingScreens, sess.ID)
@@ -50,18 +50,17 @@ func (p *Runner) derivePaneStatus(sess store.Session, pane string, agentAlive bo
 // waitingScreen is what a waiting session asks the user: the conversation
 // above the input box and the question of a dialog drawn below it. The rest
 // of the pane is the tool's frame, where a status line ticks on its own.
-func (p *Runner) waitingScreen(tool, pane string) string {
-	text := p.engine.Plain(tool, pane)
+func (p *Runner) waitingScreen(tool string, pane paneObservation) string {
+	text := pane.plain
 	region, ok := p.engine.ActivityRegion(tool, text)
 	if !ok {
 		return text
 	}
-	question, _, _ := p.engine.LastMessage(tool, text)
-	return p.engine.RegionContent(tool, region) + "\x00" + question
+	return p.engine.RegionContent(tool, region) + "\x00" + pane.message
 }
 
-func (p *Runner) paneVerdict(sess store.Session, pane string, agentAlive bool, paneHashes map[string]uint64) (string, error) {
-	text := p.engine.Plain(sess.Tool, pane)
+func (p *Runner) paneVerdict(sess store.Session, pane paneObservation, agentAlive bool, paneHashes map[string]uint64) (string, error) {
+	text := pane.plain
 	region, hasRegion := p.engine.ActivityRegion(sess.Tool, text)
 	var regionHash uint64
 	if hasRegion {
@@ -102,7 +101,7 @@ func (p *Runner) paneVerdict(sess store.Session, pane string, agentAlive bool, p
 					var paneHash uint64
 					if stuck {
 						grace = stuckEndGrace
-						paneHash = hashString(pane)
+						paneHash = hashString(pane.raw)
 					}
 					now := time.Now()
 					timer, ok := p.quietSince[sess.ID]

@@ -480,7 +480,7 @@ func writeHookStatus(t *testing.T, m *harness, id, state string) {
 
 func deriveStatus(t *testing.T, m *harness, sess store.Session, pane string, agentAlive bool) string {
 	t.Helper()
-	got, err := m.poller.derivePaneStatus(sess, pane, agentAlive, map[string]uint64{})
+	got, err := m.poller.derivePaneStatus(sess, m.poller.observePane(sess.Tool, pane), agentAlive, map[string]uint64{})
 	if err != nil {
 		t.Fatalf("derivePaneStatus: %v", err)
 	}

@@ -464,8 +464,9 @@ func (p *Runner) step(ctx context.Context) Result {
 			// and the quote read next is that conversation's.
 			sess = sessions[i]
 			if pane, err := p.tmux.CapturePane(sess.ID); err == nil {
-				paneLastLines[sess.ID], panePrompts[sess.ID] = p.rowLines(ctx, sess, pane, panes[sess.ID].Path)
-				derived, err := p.derivePaneStatus(sess, pane, agentAlive, paneHashes)
+				observation := p.observePane(sess.Tool, pane)
+				paneLastLines[sess.ID], panePrompts[sess.ID] = p.rowLines(ctx, sess, observation, panes[sess.ID].Path)
+				derived, err := p.derivePaneStatus(sess, observation, agentAlive, paneHashes)
 				if err != nil {
 					return Result{Err: err}
 				}
