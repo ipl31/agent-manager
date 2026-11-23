@@ -10,6 +10,7 @@ import (
 	"github.com/YoanWai/agent-manager/internal/git"
 	"github.com/YoanWai/agent-manager/internal/keybind"
 	"github.com/YoanWai/agent-manager/internal/tmux"
+	uieffects "github.com/YoanWai/agent-manager/internal/ui/effects"
 	uiframe "github.com/YoanWai/agent-manager/internal/ui/frame"
 	uihelp "github.com/YoanWai/agent-manager/internal/ui/help"
 	"github.com/YoanWai/agent-manager/internal/ui/presentation"
@@ -558,6 +559,7 @@ func namedKey(t tea.KeyType) tea.KeyMsg { return tea.KeyMsg{Type: t} }
 
 func helpModel() *Model {
 	m := &Model{
+		effects: effectState{background: &uieffects.Lifetime{}},
 		layout: layoutState{
 			width:  120,
 			height: 30,

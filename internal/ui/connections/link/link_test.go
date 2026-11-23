@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	backgroundeffects "github.com/YoanWai/agent-manager/internal/ui/effects"
 	"slices"
 	"sync"
 	"testing"
@@ -81,7 +82,7 @@ func newClient(t *testing.T, fake *ssh) *remote.Client {
 
 func listedState(t *testing.T, fake *ssh) State {
 	t.Helper()
-	return New(newClient(t, fake), []store.Connection{{Name: "box", Destination: "me@box"}})
+	return New(newClient(t, fake), []store.Connection{{Name: "box", Destination: "me@box"}}, &backgroundeffects.Lifetime{})
 }
 
 // recorder is the root as a routed result reaches it.
@@ -315,3 +316,18 @@ type exitStatus int
 
 func (e exitStatus) Error() string { return "exit status" }
 func (e exitStatus) ExitCode() int { return int(e) }
+
+func TestLateRemoteRefreshDoesNotStartRemoteManagerAfterQuit(t *testing.T) {
+	fake := &ssh{}
+	background := &backgroundeffects.Lifetime{}
+	state := New(newClient(t, fake), []store.Connection{{Name: "box", Destination: "me@box"}}, background)
+	command := state.PollHost("box")
+	background.CloseAdmission()
+	if command == nil {
+		t.Fatal("refresh was not prepared")
+	}
+	command()
+	if calls := fake.taken(); len(calls) != 0 {
+		t.Fatalf("late remote refresh contacted host: %v", calls)
+	}
+}

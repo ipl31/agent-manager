@@ -3,6 +3,8 @@ package release
 import (
 	"context"
 	"errors"
+	"github.com/YoanWai/agent-manager/internal/ui/effects"
+	tea "github.com/charmbracelet/bubbletea"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,7 +62,7 @@ func TestUseCachedKeepsNotesWithoutDetectingAvailability(t *testing.T) {
 		t.Fatal("install detection must wait for the asynchronous check")
 		return update.Manager{}
 	}
-	s := State{Version: "0.47.1"}
+	s := State{Version: "0.47.1", background: &effects.Lifetime{}}
 	s.UseCached(configDir)
 	if s.Latest != "" || s.URL != "" || len(s.Releases) != 1 {
 		t.Fatalf("cached notes must not advertise availability, got %+v", s)
@@ -95,7 +97,7 @@ func TestApplyDefersInstallDetection(t *testing.T) {
 		called = true
 		return update.Manager{Name: "Nix", Advice: "use Nix"}
 	}
-	s := State{Version: "0.47.1"}
+	s := State{Version: "0.47.1", background: &effects.Lifetime{}}
 	cmd := s.Apply()
 	if called {
 		t.Fatal("install detection ran on the event loop")
@@ -143,5 +145,39 @@ func TestDelegatedResultWithoutANoticeChecksAvailability(t *testing.T) {
 				t.Fatalf("got %+v", msg)
 			}
 		})
+	}
+}
+
+func TestLateDelegatedResultLeafIsRejectedAfterQuit(t *testing.T) {
+	background := &effects.Lifetime{}
+	called := false
+	old := Upgraded
+	t.Cleanup(func() { Upgraded = old })
+	Upgraded = func(update.Manager, string, string, string) (string, bool, error) {
+		called = true
+		return "", false, nil
+	}
+	// The actual callback posts a BatchMsg. Fence the result leaf itself,
+	// including when that message was queued before admission closed.
+	queued := delegatedCompletion(background, update.Manager{Name: "fixture"}, "/fixture", "1", "2", nil).(tea.BatchMsg)
+	background.CloseAdmission()
+	queued[0]()
+	if called {
+		t.Fatal("delayed delegated result performed network/cache work after quit")
+	}
+}
+
+func TestDirectApplyGeneratedBeforeQuitDoesNotDetectOrWrite(t *testing.T) {
+	background := &effects.Lifetime{}
+	state := State{Version: "1", background: background}
+	old := DetectManager
+	t.Cleanup(func() { DetectManager = old })
+	called := false
+	DetectManager = func(string) update.Manager { called = true; return update.Manager{Advice: "fixture"} }
+	command := state.Apply()
+	background.CloseAdmission()
+	command()
+	if called {
+		t.Fatal("late direct updater started after quit")
 	}
 }

@@ -114,7 +114,7 @@ func (r launchHintRoot) StartInstall() bool {
 	return true
 }
 
-func (r launchHintRoot) CopyLaunchCommand() tea.Cmd { return r.ledger.install.Copy() }
+func (r launchHintRoot) CopyLaunchCommand() tea.Cmd { return r.Background(r.ledger.install.Copy()) }
 
 func (r launchHintRoot) CardWidth() int { return r.cardWidth() }
 

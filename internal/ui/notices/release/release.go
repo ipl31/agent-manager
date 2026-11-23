@@ -10,7 +10,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/YoanWai/agent-manager/internal/ui/effects"
 	"os"
+	"os/exec"
 	"time"
 
 	"github.com/YoanWai/agent-manager/internal/config"
@@ -36,6 +38,7 @@ const (
 // notices. Applying marks an in-flight self-update; RestartPath, once set,
 // tells main to exec the freshly swapped binary after the program exits.
 type State struct {
+	background     *effects.Lifetime
 	Version        string
 	Latest         string
 	URL            string
@@ -73,8 +76,11 @@ type Root interface {
 
 // New restores the what's-new versions that are still current. A read
 // failure just means no notice.
-func New(st Store, version string) State {
-	return State{Version: version, FeedPending: true, WhatsNewVersion: setting(st, WhatsNewSetting), WhatsNewFrom: setting(st, WhatsNewFromSetting)}
+func New(st Store, version string, background *effects.Lifetime) State {
+	if background == nil {
+		panic("release requires an owned background lifetime")
+	}
+	return State{background: background, Version: version, FeedPending: true, WhatsNewVersion: setting(st, WhatsNewSetting), WhatsNewFrom: setting(st, WhatsNewFromSetting)}
 }
 
 func setting(st Store, key string) string {
@@ -271,21 +277,21 @@ func Tick() tea.Cmd {
 // TUI simply shows no badge.
 func (s *State) Check() tea.Cmd {
 	version := s.Version
-	return func() tea.Msg { return fetchUpdates(version, false) }
+	return effects.Leaf(s.background, func() tea.Msg { return fetchUpdates(version, false) })
 }
 
 func (s *State) CheckFeed() tea.Cmd {
 	version := s.Version
-	return func() tea.Msg { return fetchFeed(version, false) }
+	return effects.Leaf(s.background, func() tea.Msg { return fetchFeed(version, false) })
 }
 
 func (s *State) CheckStartupFeed() tea.Cmd {
 	version := s.Version
-	return func() tea.Msg {
+	return effects.Leaf(s.background, func() tea.Msg {
 		msg := fetchFeed(version, false)
 		msg.Startup = true
 		return msg
-	}
+	})
 }
 
 // Refresh is one manual pass over releases and the feed, refused while the
@@ -298,8 +304,8 @@ func (s *State) Refresh() tea.Cmd {
 	s.RefreshPending = 2
 	version := s.Version
 	return tea.Batch(
-		func() tea.Msg { return fetchUpdates(version, true) },
-		func() tea.Msg { return fetchFeed(version, true) },
+		effects.Leaf(s.background, func() tea.Msg { return fetchUpdates(version, true) }),
+		effects.Leaf(s.background, func() tea.Msg { return fetchFeed(version, true) }),
 	)
 }
 
@@ -364,6 +370,8 @@ func fetchFeed(version string, force bool) FeedMsg {
 
 func (s *State) Route(root Root, msg tea.Msg) (tea.Cmd, bool) {
 	switch msg := msg.(type) {
+	case delegatedReadyMsg:
+		return delegatedCmd(s.background, msg.Command, msg.Manager, msg.Path, msg.Version, msg.Expected), true
 	case UpdateMsg:
 		if msg.Manual {
 			s.finishRefresh()
@@ -459,7 +467,7 @@ var Upgraded = update.Manager.Upgraded
 // report the path to restart into.
 func (s *State) Apply() tea.Cmd {
 	version, expected := s.Version, s.Latest
-	return func() tea.Msg {
+	return effects.Leaf(s.background, func() tea.Msg {
 		execPath, err := os.Executable()
 		if err != nil {
 			return AppliedMsg{Err: err}
@@ -469,7 +477,7 @@ func (s *State) Apply() tea.Cmd {
 			return AppliedMsg{Err: errors.New(manager.Advice)}
 		}
 		if manager.Delegated() {
-			return delegatedCmd(manager, update.RestartTarget(execPath), version, expected)()
+			return delegatedReadyMsg{Manager: manager, Command: manager.UpgradeCommand(), Path: update.RestartTarget(execPath), Version: version, Expected: expected}
 		}
 		dir, err := config.Dir()
 		if err != nil {
@@ -486,18 +494,28 @@ func (s *State) Apply() tea.Cmd {
 			return AppliedMsg{Result: result, Err: err}
 		}
 		return AppliedMsg{Path: execPath, Result: result}
-	}
+	})
 }
 
 // delegatedCmd suspends the TUI and runs the manager's upgrade command on
 // the real terminal, so its progress output and any password prompt work as
 // in a plain shell.
-func delegatedCmd(manager update.Manager, execPath, version, expected string) tea.Cmd {
-	return uiterminal.ExecProcess(manager.UpgradeCommand(), func(err error) tea.Msg {
+type delegatedReadyMsg struct {
+	Command                 *exec.Cmd
+	Manager                 update.Manager
+	Path, Version, Expected string
+}
+
+func delegatedCmd(background *effects.Lifetime, command *exec.Cmd, manager update.Manager, execPath, version, expected string) tea.Cmd {
+	return uiterminal.OwnedExecProcess(background, command, func(err error) tea.Msg {
 		// Bubble Tea runs this callback on the event loop, and the result
 		// execs the new binary, so it goes out as a command.
-		return tea.BatchMsg{func() tea.Msg { return delegatedResult(manager, execPath, version, expected, err) }}
+		return delegatedCompletion(background, manager, execPath, version, expected, err)
 	})
+}
+
+func delegatedCompletion(background *effects.Lifetime, manager update.Manager, execPath, version, expected string, err error) tea.Msg {
+	return tea.BatchMsg{effects.Leaf(background, func() tea.Msg { return delegatedResult(manager, execPath, version, expected, err) })}
 }
 
 func delegatedResult(manager update.Manager, execPath, version, expected string, err error) AppliedMsg {

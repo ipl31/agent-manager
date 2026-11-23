@@ -6,6 +6,7 @@ import tea "github.com/charmbracelet/bubbletea"
 // target names, whether that box is still on screen, and the status bar an
 // error is reported on.
 type Root interface {
+	Background(tea.Cmd) tea.Cmd
 	ComposerFor(target ID) *Composer
 	ComposerOpen(target ID) bool
 	ReportErr(text string)
@@ -21,7 +22,7 @@ func Update(root Root, msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 
 	case SweepTickMsg:
-		return tea.Batch(SweepCmd, SweepTick()), true
+		return tea.Batch(root.Background(SweepCmd), SweepTick()), true
 
 	case PasteImageMsg:
 		return root.ComposerFor(msg.Target).AcceptImage(root, msg, root.ComposerOpen(msg.Target)), true

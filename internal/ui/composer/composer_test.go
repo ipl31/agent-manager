@@ -316,6 +316,8 @@ type fakeHost struct {
 
 func (h *fakeHost) ReportErr(text string) { h.errs = append(h.errs, text) }
 
+func (h *fakeHost) Background(cmd tea.Cmd) tea.Cmd { return cmd }
+
 func (h *fakeHost) ClearErr() { h.cleared++ }
 
 // A clipboard result lands through the composer's host alone: a path fills

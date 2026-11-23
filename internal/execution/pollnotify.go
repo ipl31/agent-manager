@@ -54,7 +54,9 @@ func (p *Runner) notifyTransition(sess store.Session, newStatus, prompt, quote s
 	// Delivery can wait on an external process (osascript, notify-send,
 	// the user's command), so it must never run inside refreshOnce, which
 	// holds runMu.
+	p.notifyWait.Add(1)
 	go func() {
+		defer p.notifyWait.Done()
 		p.notifyFn(event)
 		if unshown {
 			p.showCommandFn(command)

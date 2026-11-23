@@ -316,7 +316,7 @@ func (m *Model) stepGroupBase(target uilaunch.BaseTarget, gen uint64, dir, curre
 	if cmd == nil {
 		m.clearErr()
 	}
-	return next, cmd
+	return next, m.Background(cmd)
 }
 
 func (m *Model) handleGroupBaseStep(msg uilaunch.BaseStepMsg) {
@@ -356,13 +356,13 @@ func (m *Model) refreshSpawnBase() tea.Cmd {
 	if !m.ledger.spawner.ReserveBaseFetch(key, time.Now()) {
 		return nil
 	}
-	return uilaunch.ResolveBaseCmd(m.services.gitDrv, key)
+	return m.Background(uilaunch.ResolveBaseCmd(m.services.gitDrv, key))
 }
 
 // recordBaseFetch keeps what a step of a base refresh found, and starts the
 // fetch once the resolving step is in.
 func (m *Model) recordBaseFetch(msg uilaunch.BaseFetchedMsg) tea.Cmd {
-	return m.ledger.spawner.RecordBaseFetch(msg, m.services.gitDrv, m.prefs.baseFetchOff)
+	return m.Background(m.ledger.spawner.RecordBaseFetch(msg, m.services.gitDrv, m.prefs.baseFetchOff))
 }
 
 // pendingWorktreeSpawn is the directory and group of the worktree spawn the

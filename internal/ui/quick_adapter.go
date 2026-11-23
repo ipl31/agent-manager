@@ -65,7 +65,7 @@ func (m *Model) openQuickModeWithReader(reader uipersist.Reader) tea.Cmd {
 	if m.settings.Pending > 0 {
 		return tea.Batch(m.quickWorktreeProbeCmd(false), catalog)
 	}
-	return tea.Batch(uipersist.LoadCmd(uipersist.LoadRequest{Target: uipersist.QuickTarget, Generation: uint64(q.Gen), Extra: m.choiceSettingKeys()}, reader), catalog)
+	return tea.Batch(m.Background(uipersist.LoadCmd(uipersist.LoadRequest{Target: uipersist.QuickTarget, Generation: uint64(q.Gen), Extra: m.choiceSettingKeys()}, reader)), catalog)
 }
 
 // applyCachedQuickDefaults takes the loaded defaults. A tool the load moved
@@ -300,10 +300,10 @@ func (m *Model) returnQuickSendImages(request uiquicksend.SendRequest) tea.Cmd {
 		return nil
 	}
 	images := slices.Clone(request.Images)
-	return func() tea.Msg {
+	return m.Background(func() tea.Msg {
 		uiinstall.DropImages(images)
 		return nil
-	}
+	})
 }
 
 // quickServices is the effect services as a quick send reaches them.

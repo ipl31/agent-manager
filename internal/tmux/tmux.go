@@ -46,8 +46,9 @@ const (
 )
 
 type Driver struct {
-	bin    string
-	socket string
+	controls controlRegistry
+	bin      string
+	socket   string
 
 	attachSizeLargest atomic.Bool
 	paneTheme         atomic.Pointer[PaneTheme]

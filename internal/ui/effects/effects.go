@@ -5,6 +5,7 @@
 package effects
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"sync"
@@ -101,19 +102,49 @@ func (l *Lifetime) Done() { l.running.Done() }
 // CloseAndWait refuses new work and waits up to limit for running work,
 // reporting whether it all finished.
 func (l *Lifetime) CloseAndWait(limit time.Duration) bool {
+	l.CloseAdmission()
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
+	defer cancel()
+	return l.Join(ctx) == nil
+}
+
+// CloseAdmission only rejects future starts; Update may call it without
+// waiting for a worker or performing I/O.
+func (l *Lifetime) CloseAdmission() {
 	l.mu.Lock()
 	l.closed = true
 	l.mu.Unlock()
+}
+
+// Join is called after CloseAdmission, outside Update. A deadline means the
+// caller cannot release resources the admitted workers may still use.
+func (l *Lifetime) Join(ctx context.Context) error {
 	finished := make(chan struct{})
-	go func() {
-		l.running.Wait()
-		close(finished)
-	}()
+	go func() { l.running.Wait(); close(finished) }()
 	select {
 	case <-finished:
-		return true
-	case <-time.After(limit):
-		return false
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// Leaf fences one audited leaf, never a Batch, Sequence or Exec factory.
+// Admission is checked at execution, so a generated but unstarted command
+// cannot begin work after its owner has stopped.
+func Leaf(lifetime *Lifetime, command tea.Cmd) tea.Cmd {
+	if lifetime == nil {
+		panic("background command requires an owned lifetime")
+	}
+	if command == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		if !lifetime.Begin() {
+			return nil
+		}
+		defer lifetime.Done()
+		return command()
 	}
 }
 

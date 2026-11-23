@@ -458,7 +458,7 @@ func (m *Model) copyReplySelected() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	reader := uilifecycle.ReplyReader{Store: m.services.store, Driver: m.services.tmux, Engine: m.services.engine, History: quoteHistoryLines}
-	return m, func() tea.Msg {
+	return m, m.Background(func() tea.Msg {
 		reply, err := reader.Copy(sess)
 		if err != nil {
 			return errMsg{err}
@@ -469,7 +469,7 @@ func (m *Model) copyReplySelected() (tea.Model, tea.Cmd) {
 		return copyTextCmd(reply.Text, func(chars int) tea.Msg {
 			return replyCopiedMsg{chars: chars, name: sess.Name, tool: sess.Tool, unbounded: reply.Unbounded}
 		})()
-	}
+	})
 }
 
 // replyCopiedMsg reports a finished copy. No chars means the turn held
@@ -582,7 +582,7 @@ func (m *Model) openEditorWithReaderForReturn(reader terminalDirectoryReader, re
 	}
 	request.returnID = returnID
 	request.editor = m.captureEditorResolution()
-	return m, terminalDirectoryCmd(request, reader)
+	return m, m.Background(terminalDirectoryCmd(request, reader))
 }
 
 func (m *Model) openDiffFile() (tea.Model, tea.Cmd) {
@@ -590,7 +590,7 @@ func (m *Model) openDiffFile() (tea.Model, tea.Cmd) {
 	if request == nil {
 		return m, nil
 	}
-	return m, reviewFileCheckCmd(*request, m.captureEditorResolution(), m.gens.foreground)
+	return m, m.Background(reviewFileCheckCmd(*request, m.captureEditorResolution(), m.gens.foreground))
 }
 
 func (m *Model) handleDiffFileChecked(msg editorFileCheckedMsg) (tea.Model, tea.Cmd) {
@@ -616,11 +616,11 @@ func (m *Model) launchEditor(editor uisession.Launch, returnTo editorReturnTarge
 	m.clearErr()
 	if editor.TakesScreen() {
 		m.handOffTerminal()
-		return m, uiterminal.ExecProcess(editor.Command, func(err error) tea.Msg {
+		return m, uiterminal.OwnedExecProcess(m.effects.background, editor.Command, func(err error) tea.Msg {
 			return editorDoneMsg{err: err, tookScreen: true, returnTo: returnTo}
 		})
 	}
-	return m, startEditorCmd(editor.Command, editor.Name, editor.Path, returnTo)
+	return m, m.Background(startEditorCmd(editor.Command, editor.Name, editor.Path, returnTo))
 }
 
 // Starting a process is exec, which Update must not do: a slow launch
@@ -747,7 +747,7 @@ func (m *Model) applyAttachEffect(request uilifecycle.AttachRequest, result uili
 		m.reportErr(result.Warning.Error())
 	}
 	m.handOffTerminal()
-	return uiterminal.ExecProcess(m.services.tmux.AttachCommand(request.ID), func(err error) tea.Msg { return attachDoneMsg{sessID: request.ID, err: err} })
+	return uiterminal.OwnedExecProcess(m.effects.background, m.services.tmux.AttachCommand(request.ID), func(err error) tea.Msg { return attachDoneMsg{sessID: request.ID, err: err} })
 }
 
 // launchLedger is what a manager run remembers about the sessions it starts

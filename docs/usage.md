@@ -374,6 +374,9 @@ The commands that run with no caller are a convenience for a manager reaching th
 
 Queued messages, status and after-turn archives and kills move only while a manager runs. `agent-manager serve` runs one with no screen, on a machine where nobody keeps the TUI open, until it is interrupted or sent SIGTERM. `serve --background` starts that manager detached, with its output appended to `serve.log` in the profile directory, unless one is already running, and prints `{"started":true,"pid":N}` or `{"started":false}`. A serve holds a lock on `serve.lock` in the profile directory while it runs, so a second `serve` exits at once with a note that one is already running, and `serve --background` answers `{"started":false}` even before the first one has polled. It runs on macOS and Linux.
 
+Only one manager polls a profile on a given multiplexer server. Opening another TUI asks the previous TUI or headless manager to finish its work and exit, with a note explaining the takeover. A headless manager never displaces an open TUI. An active installer or terminal attachment keeps its existing protection; if the old manager cannot finish promptly, the new one reports that it is still waiting and does not start a second poller. Managers using different profiles or different server identities stay independent. Older releases do not participate in this coordination and must be closed separately; existing queued-message delivery guards still apply.
+
+
 The MCP tools always act as the session that runs them, and refuse every call, `host::id` targets included, from a server with no session, since several CLIs keep the server registered for their runs outside Agent Manager too. `report_issue` is the exception: it touches no session, so it stays open there.
 
 ### Bugs and ideas

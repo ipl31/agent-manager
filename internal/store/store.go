@@ -26,18 +26,11 @@ type Store struct {
 const busyTimeout = "?_pragma=busy_timeout(5000)&_txlock=immediate"
 
 func Open(path string) (*Store, error) {
-	absPath, err := filepath.Abs(path)
+	absPath, err := resolveStorePath(path)
 	if err != nil {
-		return nil, fmt.Errorf("resolve store path: %w", err)
+		return nil, err
 	}
-	// Use one lock identity when callers reach the same profile through a
-	// symlinked directory. The DB itself may not exist yet, so resolve its
-	// parent and retain the requested filename.
-	if realPath, evalErr := filepath.EvalSymlinks(absPath); evalErr == nil {
-		absPath = realPath
-	} else if realDir, evalErr := filepath.EvalSymlinks(filepath.Dir(absPath)); evalErr == nil {
-		absPath = filepath.Join(realDir, filepath.Base(absPath))
-	}
+
 	if err := restrictToOwner(absPath); err != nil {
 		return nil, err
 	}
@@ -62,17 +55,108 @@ func Open(path string) (*Store, error) {
 	return store, nil
 }
 
+// A deliberate dangling database symlink still needs its actual target
+// created privately before SQLite opens it, with sidecars beside that target.
+func resolveStorePath(path string) (string, error) {
+	path, err := rawAbsoluteStorePath(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve store path: %w", err)
+	}
+	var seen []os.FileInfo
+	for {
+		directory, base := filepath.Split(path)
+		parent, err := filepath.EvalSymlinks(directory)
+		if err != nil {
+			return "", fmt.Errorf("resolve store path: %w", err)
+		}
+		entry := filepath.Join(parent, base)
+		info, err := os.Lstat(entry)
+		if errors.Is(err, fs.ErrNotExist) {
+			return entry, nil
+		}
+		if err != nil {
+			return "", fmt.Errorf("resolve store path: %w", err)
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			return entry, nil
+		}
+		for _, previous := range seen {
+			if os.SameFile(info, previous) {
+				return "", fmt.Errorf("resolve store path: symlink cycle at %s", entry)
+			}
+		}
+		seen = append(seen, info)
+		target, err := os.Readlink(entry)
+		if err != nil {
+			return "", fmt.Errorf("resolve store path: %w", err)
+		}
+		switch {
+		case filepath.IsAbs(target):
+			path = target
+		case filepath.VolumeName(target) != "":
+			path, err = rawAbsoluteStorePath(target)
+			if err != nil {
+				return "", fmt.Errorf("resolve store path: %w", err)
+			}
+		case os.IsPathSeparator(target[0]):
+			path = filepath.VolumeName(parent) + target
+		default:
+			path = parent + string(os.PathSeparator) + target
+		}
+	}
+}
+
+// Prefix a physical current directory without cleaning a raw symlink/..
+// traversal. A drive-relative Windows path uses that drive's own directory.
+func rawAbsoluteStorePath(path string) (string, error) {
+	if filepath.IsAbs(path) {
+		return path, nil
+	}
+	var parent string
+	var err error
+	if volume := filepath.VolumeName(path); volume != "" {
+		parent, err = filepath.Abs(volume + ".")
+		path = path[len(volume):]
+	} else {
+		parent, err = os.Getwd()
+	}
+	if err != nil {
+		return "", err
+	}
+	parent, err = filepath.EvalSymlinks(parent)
+	if err != nil {
+		return "", err
+	}
+	if path != "" && os.IsPathSeparator(path[0]) {
+		return filepath.VolumeName(parent) + path, nil
+	}
+	return parent + string(os.PathSeparator) + path, nil
+}
+
 // restrictToOwner keeps the database readable by this user alone, since
 // environment profiles store tokens in it. SQLite gives its WAL and shared
 // memory files the database's own mode, so creating it 0600 covers them; a
 // database from an earlier release, created 0644, is tightened in place.
 func restrictToOwner(path string) error {
-	file, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0o600)
+	// Closing a raw descriptor to an existing inode would drop SQLite's POSIX locks.
+	file, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil && !errors.Is(err, fs.ErrExist) {
+		return fmt.Errorf("open store: %w", err)
+	}
+	if err == nil {
+		file.Close()
+	}
+	info, err := os.Stat(path)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
-	file.Close()
-	for _, name := range []string{path, path + "-wal", path + "-shm"} {
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("open store: %s is not a regular file", path)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return fmt.Errorf("restrict store: %w", err)
+	}
+	for _, name := range []string{path + "-wal", path + "-shm"} {
 		if err := os.Chmod(name, 0o600); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("restrict store: %w", err)
 		}

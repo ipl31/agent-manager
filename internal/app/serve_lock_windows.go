@@ -15,18 +15,25 @@ func tryServeLock(path string) (release func(), acquired bool, err error) {
 	if err != nil {
 		return nil, false, fmt.Errorf("open serve lock: %w", err)
 	}
+	acquired, err = tryOwnershipFileLock(file)
+	if err != nil || !acquired {
+		file.Close()
+		return nil, false, err
+	}
+	return func() { _ = file.Close() }, true, nil
+}
+
+func tryOwnershipFileLock(file *os.File) (bool, error) {
 	// Like flock, the lock belongs to this handle and ends when it closes,
 	// including when the process holding it dies.
-	err = windows.LockFileEx(windows.Handle(file.Fd()),
+	err := windows.LockFileEx(windows.Handle(file.Fd()),
 		windows.LOCKFILE_EXCLUSIVE_LOCK|windows.LOCKFILE_FAIL_IMMEDIATELY,
 		0, 1, 0, new(windows.Overlapped))
 	if errors.Is(err, windows.ERROR_LOCK_VIOLATION) {
-		file.Close()
-		return nil, false, nil
+		return false, nil
 	}
 	if err != nil {
-		file.Close()
-		return nil, false, fmt.Errorf("lock %s: %w", path, err)
+		return false, fmt.Errorf("lock %s: %w", file.Name(), err)
 	}
-	return func() { _ = file.Close() }, true, nil
+	return true, nil
 }

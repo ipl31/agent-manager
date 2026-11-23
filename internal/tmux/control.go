@@ -102,14 +102,36 @@ func (d *Driver) OpenControl(id string) (*Control, error) {
 // until Close is called. Where the multiplexer's control client cannot be
 // relied on it fails, and callers poll captures instead.
 func (d *Driver) OpenControlContext(ctx context.Context, id string) (*Control, error) {
+	return d.openControlContext(ctx, id, (*exec.Cmd).Wait)
+}
+
+func (d *Driver) openControlContext(ctx context.Context, id string, wait func(*exec.Cmd) error) (*Control, error) {
 	if err := controlUnavailable(); err != nil {
 		return nil, err
 	}
+	if !d.controls.begin() {
+		return nil, errors.New("control clients have stopped")
+	}
+	defer d.controls.opening.Done()
 	release, err := enterGateContext(ctx, d.socket, true)
 	if err != nil {
 		return nil, err
 	}
-	defer release()
+	var record *controlCompletion
+	defer func() {
+		if record != nil && record.cleanup {
+			go func() {
+				<-record.control.reaped
+				release()
+				close(record.gateReleased)
+			}()
+			return
+		}
+		release()
+		if record != nil {
+			close(record.gateReleased)
+		}
+	}()
 	processCtx, cancelProcess := context.WithCancel(context.Background())
 	cmd := d.commandContext(processCtx, "-C", "attach-session", "-t", sessionName(id))
 	configureBoundedCommand(cmd)
@@ -133,11 +155,13 @@ func (d *Driver) OpenControlContext(ctx context.Context, id string) (*Control, e
 	control.socket = d.socket
 	control.cancelProcess = cancelProcess
 	control.reaped = make(chan struct{})
+	record = d.controls.add(control)
 	go func() {
 		<-control.done
-		_ = cmd.Wait()
+		_ = wait(cmd)
 		cancelProcess()
 		close(control.reaped)
+		d.controls.finish(record)
 	}()
 	// Keep the exclusive gate through the greeting. If opening is canceled,
 	// kill and reap this client before releasing the gate so no cooperating
@@ -149,6 +173,7 @@ func (d *Driver) OpenControlContext(ctx context.Context, id string) (*Control, e
 			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), commandTimeout)
 			reapErr := control.waitReaped(cleanupCtx)
 			cleanupCancel()
+			record.cleanup = true
 			return nil, errors.Join(fmt.Errorf("control attach: %w", ctx.Err()), reapErr)
 		}
 		return control, nil
@@ -160,6 +185,7 @@ func (d *Driver) OpenControlContext(ctx context.Context, id string) (*Control, e
 		reapErr := control.waitReaped(cleanupCtx)
 		cleanupCancel()
 		if reapErr != nil {
+			record.cleanup = true
 			return nil, fmt.Errorf("control attach exited: %w", reapErr)
 		}
 		// Preserve the original API: an ungreeted client is a successfully
@@ -172,6 +198,7 @@ func (d *Driver) OpenControlContext(ctx context.Context, id string) (*Control, e
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), commandTimeout)
 		reapErr := control.waitReaped(cleanupCtx)
 		cleanupCancel()
+		record.cleanup = true
 		return nil, errors.Join(fmt.Errorf("control attach: %w", ctx.Err()), reapErr)
 	}
 }

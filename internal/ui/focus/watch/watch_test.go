@@ -1,6 +1,8 @@
 package watch
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -741,5 +743,28 @@ func TestFocusWatchCountsWritesToThePolledPane(t *testing.T) {
 	watch.mu.Unlock()
 	if !watch.CaughtUp(landed) {
 		t.Fatal("a frame taken once the write landed was not caught up")
+	}
+}
+
+func TestCloseContextCanConfirmRetainedControlAfterWatcherExit(t *testing.T) {
+	skipControlMode(t)
+	driver := requireDriver(t)
+	id := "confirm" + strings.ReplaceAll(time.Now().Format("150405.000000"), ".", "")
+	if err := driver.Create(id, os.TempDir(), "", nil, 80, 24); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { driver.Kill(id) })
+	control, err := driver.OpenControl(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	watcher := &Watcher{closing: map[*tmux.Control]error{control: errors.New("previous close unconfirmed")}}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := watcher.CloseContext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(watcher.closing) != 0 {
+		t.Fatal("confirmed client remained uncertain")
 	}
 }

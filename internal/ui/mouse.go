@@ -360,7 +360,7 @@ func (m *Model) listPress(msg tea.MouseMsg, ctx uirail.MouseContext) (tea.Model,
 	}
 	if msg.Button == tea.MouseButtonLeft && m.onContentColumn(msg.X, msg.Y) {
 		if url := m.layout.previewLinks.ShownAt(msg.X, msg.Y); url != "" {
-			return m, openLinkCmd(url)
+			return m, m.openLinkCmd(url)
 		}
 		return m.focusFromPreview()
 	}

@@ -8,6 +8,6 @@ import (
 )
 
 // restart replaces this process with the binary at path.
-func restart(path string) error {
-	return syscall.Exec(path, os.Args, os.Environ())
+func restart(path string, args []string) error {
+	return syscall.Exec(path, args, os.Environ())
 }

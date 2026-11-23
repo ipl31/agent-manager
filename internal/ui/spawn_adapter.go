@@ -49,11 +49,11 @@ func (m *Model) openFormWithReader(reader uipersist.Reader) tea.Cmd {
 		f.RestartChoice(m.spawnHost())
 	}
 	catalog := m.ensureCatalog(tools[toolIndex])
-	saved := uipersist.SavedCmd(m.services.store, uipersist.SavedForForm, uint64(prompt.Gen), 0)
+	saved := m.Background(uipersist.SavedCmd(m.services.store, uipersist.SavedForForm, uint64(prompt.Gen), 0))
 	if m.settings.Pending > 0 {
 		return tea.Batch(m.formWorktreeProbeCmd(false), catalog, saved)
 	}
-	return tea.Batch(uipersist.LoadCmd(uipersist.LoadRequest{Target: uipersist.FormTarget, Generation: uint64(prompt.Gen), Extra: m.choiceSettingKeys()}, reader), catalog, saved)
+	return tea.Batch(m.Background(uipersist.LoadCmd(uipersist.LoadRequest{Target: uipersist.FormTarget, Generation: uint64(prompt.Gen), Extra: m.choiceSettingKeys()}, reader)), catalog, saved)
 }
 
 // applyCachedFormDefaults takes the loaded tool and worktree defaults. A
@@ -287,7 +287,7 @@ var _ spawn.SurfaceRoot = spawnFormRoot{}
 // since an answer takes up to seconds.
 func (m *Model) ensureCatalog(toolName string) tea.Cmd {
 	cmd, _ := m.ledger.spawner.EnsureCatalog(m.services.cfg, m.services.configDir, toolName, time.Now())
-	return cmd
+	return m.Background(cmd)
 }
 
 func (m *Model) handleCatalog(msg uilaunch.CatalogMsg) tea.Cmd {
@@ -298,7 +298,7 @@ func (m *Model) handleCatalog(msg uilaunch.CatalogMsg) tea.Cmd {
 		command := uiinstall.OutdatedCommand(*outdated)
 		m.presentLaunchHint(uiinstall.OutdatedFix(*outdated, command))
 	}
-	return cmd
+	return m.Background(cmd)
 }
 
 // catalogToolActive reports whether the form or the quick bar shows the CLI
@@ -621,7 +621,7 @@ func (m *Model) requestDirectoryProbe(target uilaunch.ProbeTarget, generation in
 		Target: target, Generation: generation, Sequence: m.gens.worktreeProbe,
 		Dir: dir, Toggle: toggle, From: from,
 	}
-	return uilaunch.ProbeCmd(request, preflightReader{reader: systemDirectoryPreflight{git: m.services.gitDrv}})
+	return m.Background(uilaunch.ProbeCmd(request, preflightReader{reader: systemDirectoryPreflight{git: m.services.gitDrv}}))
 }
 
 func (m *Model) formWorktreeProbeCmd(toggleOn bool) tea.Cmd {

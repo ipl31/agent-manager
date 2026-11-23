@@ -6,6 +6,9 @@ import (
 )
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if takeover, ok := msg.(TakeoverMsg); ok {
+		return m.requestTakeover(takeover)
+	}
 	if key, ok := msg.(tea.KeyMsg); ok && m.routeQuit(key) == quitNow {
 		return m.requestQuit()
 	}
@@ -18,6 +21,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	model, cmd := m.handleMsg(msg)
 	if mm, ok := model.(*Model); ok {
 		mm.flushPendingNotice()
+		if mm.effects.takeover && !mm.effects.Quitting && mm.quitBlocked() == "" {
+			_, quit := mm.requestQuit()
+			cmd = tea.Batch(cmd, quit)
+		}
 		if !mm.layout.keepFrame {
 			mm.prepareFrame()
 		}

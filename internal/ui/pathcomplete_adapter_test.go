@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	uidialogs "github.com/YoanWai/agent-manager/internal/ui/dialogs"
+	uieffects "github.com/YoanWai/agent-manager/internal/ui/effects"
 	"github.com/YoanWai/agent-manager/internal/ui/pathcomplete"
 	"github.com/YoanWai/agent-manager/internal/ui/spawn"
 	tea "github.com/charmbracelet/bubbletea"
@@ -79,7 +80,7 @@ func setupCompletionDir(t *testing.T) string {
 
 func TestApplyPathSuggestionFillsDirField(t *testing.T) {
 	root := setupCompletionDir(t)
-	m := &Model{}
+	m := &Model{effects: effectState{background: &uieffects.Lifetime{}}}
 	pushForm(m)
 	loadPathSuggestions(m, pathcomplete.Form, filepath.Join(root, "al"))
 	if !m.form().Complete.Active() {

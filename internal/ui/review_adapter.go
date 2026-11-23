@@ -32,11 +32,11 @@ func (m *Model) reviewGit() uireviewsource.Git {
 }
 
 func (m *Model) reviewLoadCmd(req uireview.LoadRequest) tea.Cmd {
-	return uireviewsource.LoadCmd(m.reviewGit(), m.services.store, req, m.reviewGroupBase(req.Target.ID))
+	return m.Background(uireviewsource.LoadCmd(m.reviewGit(), m.services.store, req, m.reviewGroupBase(req.Target.ID)))
 }
 
 func (m *Model) reviewProbeCmd(req uireview.ProbeRequest) tea.Cmd {
-	return uireviewsource.ProbeCmd(m.reviewGit(), m.services.store, req, m.reviewGroupBase(req.Target.ID))
+	return m.Background(uireviewsource.ProbeCmd(m.reviewGit(), m.services.store, req, m.reviewGroupBase(req.Target.ID)))
 }
 
 // reviewSaveCmd persists one captured review state through the effect
@@ -123,9 +123,9 @@ func (m *Model) reviewCommands(requests uireview.Requests) tea.Cmd {
 		cmds = append(cmds, m.reviewLoadCmd(*requests.Load))
 	}
 	if len(requests.Files) > 0 {
-		cmds = append(cmds, uireviewsource.FileCmd(m.reviewGit(), requests.Files[0]))
+		cmds = append(cmds, m.Background(uireviewsource.FileCmd(m.reviewGit(), requests.Files[0])))
 		if len(requests.Files) > 1 {
-			cmds = append(cmds, uireviewsource.FilesCmd(m.reviewGit(), requests.Files[1:]))
+			cmds = append(cmds, m.Background(uireviewsource.FilesCmd(m.reviewGit(), requests.Files[1:])))
 		}
 	}
 	if requests.Highlight != nil {
@@ -144,7 +144,7 @@ func (m *Model) reviewCommands(requests uireview.Requests) tea.Cmd {
 		cmds = append(cmds, m.reviewSendCmd(*requests.Send))
 	}
 	if requests.FileCheck != nil {
-		cmds = append(cmds, reviewFileCheckCmd(*requests.FileCheck, m.captureEditorResolution(), m.gens.foreground))
+		cmds = append(cmds, m.Background(reviewFileCheckCmd(*requests.FileCheck, m.captureEditorResolution(), m.gens.foreground)))
 	}
 	if requests.WidgetCmd != nil {
 		cmds = append(cmds, requests.WidgetCmd)
@@ -271,7 +271,7 @@ func (m *Model) openDiffWithReader(reader uireviewsource.Preferences) tea.Cmd {
 	target := uireviewsource.Target(sess)
 	target.Cwd = m.sessionDir(sess)
 	request := m.review.Open(target, git.ScopeUncommitted, preferred)
-	return uireviewsource.PreferencesCmd(reader, sess, request, preferred, picked, uisettings.ReviewScopeSetting)
+	return m.Background(uireviewsource.PreferencesCmd(reader, sess, request, preferred, picked, uisettings.ReviewScopeSetting))
 }
 
 func (m *Model) handleReviewPreferences(msg uireviewsource.PreferencesMsg) (tea.Model, tea.Cmd) {
@@ -518,11 +518,11 @@ func (m *Model) openBranchPickWithReader(reader uireviewsource.PickerReader) tea
 		m.reportErr("no repo under review")
 		return nil
 	}
-	return uireviewsource.PickerReadCmd(reader, uireviewsource.PickerLoadRequest{
+	return m.Background(uireviewsource.PickerReadCmd(reader, uireviewsource.PickerLoadRequest{
 		Kind:          uireviewsource.PickerLoadBranches,
 		Source:        source,
 		ForegroundGen: m.gens.foreground,
-	})
+	}))
 }
 
 // openBasePick lists auto plus the current repo's branch refs so the user can
@@ -545,11 +545,11 @@ func (m *Model) openBasePickWithReader(reader uireviewsource.PickerReader) tea.C
 		m.reportErr("no repo under review")
 		return nil
 	}
-	return uireviewsource.PickerReadCmd(reader, uireviewsource.PickerLoadRequest{
+	return m.Background(uireviewsource.PickerReadCmd(reader, uireviewsource.PickerLoadRequest{
 		Kind:          uireviewsource.PickerLoadBases,
 		Source:        source,
 		ForegroundGen: m.gens.foreground,
-	})
+	}))
 }
 
 func (m *Model) handleReviewPickerLoaded(msg uireviewsource.PickerLoadedMsg) tea.Cmd {

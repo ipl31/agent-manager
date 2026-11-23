@@ -20,6 +20,11 @@ import (
 // effectState is the root's queue plus the fence a poll reads: a listing
 // captured before the latest mutation finished is stale.
 type effectState struct {
+	background     *uieffects.Lifetime
+	ownerID        string
+	takeover       bool
+	takeoverReason error
+	forcedQuit     bool
 	uieffects.Queue
 	latestObservation time.Time
 }
@@ -99,31 +104,17 @@ func (m *Model) heldBy(main, input *uieffects.Job) bool {
 }
 
 func (m *Model) requestQuit() (tea.Model, tea.Cmd) {
-	if install := m.ledger.install.Pending; install != nil {
-		m.reportErr("install may still be running in " + install.Name + "; finish it, kill its terminal with the session controls, or attach and interrupt it before quitting")
+	if reason := m.quitBlocked(); reason != "" {
+		m.reportErr(reason)
 		return m, nil
 	}
-	starting := func(job *uieffects.Job) (uiinstall.StartRequest, bool) {
-		if job == nil {
-			return uiinstall.StartRequest{}, false
-		}
-		request, ok := job.Request.(uiinstall.StartRequest)
-		return request, ok
-	}
-	if request, ok := starting(m.effects.Main.Active); ok {
-		m.reportErr("install for " + request.Binary + " is still starting; wait for its installer shell before quitting")
-		return m, nil
-	}
-	for _, job := range m.effects.Main.Pending {
-		if request, ok := starting(job); ok {
-			m.reportErr("install for " + request.Binary + " is still queued; wait for its installer shell before quitting")
-			return m, nil
-		}
-	}
+
 	if m.effects.Quitting {
+		m.effects.forcedQuit = true
 		return m, m.effects.Abandon(effectName)
 	}
 	m.prepareSplitForQuit()
+	m.effects.background.CloseAdmission()
 	m.effects.Quitting = true
 	if awaited, ok := m.effects.FirstUnfinished(); ok {
 		m.reportErr("finishing " + effectName(awaited.Request) + " before quitting; press the quit key again to leave without waiting")
@@ -184,4 +175,21 @@ func (m *Model) routeEffectMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return routed(m.handleEffectCompleted(msg))
 	}
 	return nil, nil, false
+}
+
+func (m *Model) quitBlocked() string {
+	if install := m.ledger.install.Pending; install != nil {
+		return "install may still be running in " + install.Name + "; finish it, kill its terminal with the session controls, or attach and interrupt it before quitting"
+	}
+	if job := m.effects.Main.Active; job != nil {
+		if request, ok := job.Request.(uiinstall.StartRequest); ok {
+			return "install for " + request.Binary + " is still starting; wait for its installer shell before quitting"
+		}
+	}
+	for _, job := range m.effects.Main.Pending {
+		if request, ok := job.Request.(uiinstall.StartRequest); ok {
+			return "install for " + request.Binary + " is still queued; wait for its installer shell before quitting"
+		}
+	}
+	return ""
 }

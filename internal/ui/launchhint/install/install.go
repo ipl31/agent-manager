@@ -59,6 +59,7 @@ type Pending struct {
 type Retry = uieffects.Request
 
 type Root interface {
+	Background(tea.Cmd) tea.Cmd
 	ReportErr(text string)
 	ReportDone(text string)
 	// SessionLaunched records a row the install opened, so a poll that
@@ -184,7 +185,7 @@ func (s *State) Started(root Root, request StartRequest, result StartResult, err
 		if stillOpen {
 			s.Launch.Images = append(request.Images, s.Launch.Images...)
 		} else {
-			cleanup = CleanupImages(request.Images)
+			cleanup = root.Background(CleanupImages(request.Images))
 		}
 		root.ReportErr(err.Error())
 		return cleanup

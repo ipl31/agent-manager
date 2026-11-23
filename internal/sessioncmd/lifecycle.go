@@ -100,6 +100,7 @@ type DeleteResult struct {
 // by the interactive manager and session-scoped commands. Its runtime is
 // borrowed; closing resources remains the composing process's responsibility.
 type Lifecycle struct {
+	pickers  *pickerWorkers
 	runtime  Runtime
 	setLabel func(string, string) error
 	killPane func(string) error
@@ -109,7 +110,7 @@ func NewLifecycle(runtime Runtime) (*Lifecycle, error) {
 	if err := validateRuntime(runtime); err != nil {
 		return nil, err
 	}
-	return &Lifecycle{runtime: runtime, setLabel: runtime.Driver.SetLabel, killPane: runtime.Driver.Kill}, nil
+	return &Lifecycle{pickers: &pickerWorkers{}, runtime: runtime, setLabel: runtime.Driver.SetLabel, killPane: runtime.Driver.Kill}, nil
 }
 
 func (l *Lifecycle) requireHooks() error {
@@ -342,7 +343,7 @@ func (l *Lifecycle) revive(sess store.Session, pane PaneSize) (RelaunchResult, e
 			return RelaunchResult{}, err
 		}
 		if relaunched.AgentSessionID == "" && tool.ResumePickerKeys != "" {
-			InjectPickerKeys(l.runtime.Driver, relaunched.ID, tool)
+			l.injectPickerKeys(l.runtime.Driver, relaunched.ID, tool)
 		}
 		relaunched.Status = status.Starting
 		return RelaunchResult{Session: relaunched, LaunchedAt: relaunched.AgentLaunchedAt, ReusedPane: true, Degraded: degraded(relaunched), Warning: warning}, nil
@@ -443,7 +444,7 @@ func (l *Lifecycle) launchExisting(sess store.Session, tool config.Tool, baseCom
 		return RelaunchResult{}, err
 	}
 	if injectPicker && sess.AgentSessionID == "" && tool.ResumePickerKeys != "" {
-		InjectPickerKeys(l.runtime.Driver, sess.ID, tool)
+		l.injectPickerKeys(l.runtime.Driver, sess.ID, tool)
 	}
 	sess.Status = status.Starting
 	sess.AgentLaunchedAt = launchedAt

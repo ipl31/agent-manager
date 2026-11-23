@@ -27,6 +27,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+var showLinkPage = uiterminal.ShowLinkPage
+
 func (m *Model) routeFocusMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case linkOpenErrMsg:
@@ -35,7 +37,7 @@ func (m *Model) routeFocusMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 
 	case linkPageMsg:
 		m.handOffTerminal()
-		return routed(m, uiterminal.ShowLinkPage(msg.url))
+		return routed(m, showLinkPage(m.effects.background, msg.url))
 
 	case uifocus.CopiedMessage:
 		// The clipboard writer runs off the update loop and can take hundreds
@@ -302,9 +304,9 @@ func (m *Model) focusRegionCmd(sessID string, offset int) tea.Cmd {
 
 func (m *Model) focusRegionRequestCmd(request uifocus.RegionRequest) tea.Cmd {
 	watch := m.focus.runtime.Watch
-	return func() tea.Msg {
+	return m.Background(func() tea.Msg {
 		return focusruntime.Scroll(watch, request.SessionID, request.Offset, request.Rows)
-	}
+	})
 }
 
 func copyTextCmd(text string, done func(chars int) tea.Msg) tea.Cmd {
@@ -361,7 +363,7 @@ func (m *Model) focused() bool {
 func (m *Model) openFocusSaved() tea.Cmd {
 	s := uifocus.OpenSaved(focusSavedRoot{m}, uint64(m.nextComposerGen()), m.spawnStyles())
 	m.push(s)
-	return uipersist.SavedCmd(m.services.store, uipersist.SavedForFocus, s.Gen(), 0)
+	return m.Background(uipersist.SavedCmd(m.services.store, uipersist.SavedForFocus, s.Gen(), 0))
 }
 
 func (m *Model) loadFocusSaved(msg uipersist.SavedMsg) {

@@ -81,16 +81,26 @@ type Root interface {
 	ReportErr(err error)
 }
 
+// CaptureLifetime admits a capture and counts its borrowed resources.
+type CaptureLifetime interface {
+	Begin() bool
+	Done()
+}
+
 // State is the preview's own runtime: the drafts waiting on their sessions
 // and the timers that re-read the pane.
 type State struct {
-	store   *store.Store
-	tmux    *tmux.Driver
-	Pending map[string]TypedPrompt
+	background CaptureLifetime
+	store      *store.Store
+	tmux       *tmux.Driver
+	Pending    map[string]TypedPrompt
 }
 
-func New(st *store.Store, driver *tmux.Driver) State {
-	return State{store: st, tmux: driver}
+func New(st *store.Store, driver *tmux.Driver, background CaptureLifetime) State {
+	if background == nil {
+		panic("preview requires an owned background lifetime")
+	}
+	return State{store: st, tmux: driver, background: background}
 }
 
 // Interval is the cadence the selected session earns: an agent producing
@@ -120,6 +130,10 @@ func (s *State) Schedule(gen uint64) tea.Cmd {
 // settle capture is one capture-pane, not a resize+capture+pid storm.
 func (s *State) Capture(sess store.Session, gen uint64) tea.Cmd {
 	return func() tea.Msg {
+		if !s.background.Begin() {
+			return nil
+		}
+		defer s.background.Done()
 		msg := Msg{SessID: sess.ID, Gen: gen}
 		if sess.Archived || !s.tmux.Exists(sess.ID) {
 			snapshot, err := execution.StoredPreview(s.store, s.tmux, sess.ID)

@@ -62,7 +62,7 @@ func (h helpHost) StatusShown() bool { return h.errBar.text != "" }
 
 func (h helpHost) TakeForeground() { h.takeForeground() }
 
-func (h helpHost) OpenDocs() tea.Cmd { return openLink(docsURL) }
+func (h helpHost) OpenDocs() tea.Cmd { return h.openLink(docsURL) }
 
 // openHelp scopes the key map to Review when Review is underneath. The base
 // is read here, to open, and never again.

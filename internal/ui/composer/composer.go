@@ -64,6 +64,7 @@ const (
 )
 
 type Host interface {
+	Background(tea.Cmd) tea.Cmd
 	ReportErr(text string)
 	ClearErr()
 }
@@ -620,7 +621,7 @@ func (c *Composer) ChipKey(h Host, target ID, msg tea.KeyMsg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		h.ClearErr()
-		return cmd, true
+		return h.Background(cmd), true
 	case "left":
 		if span, ok := c.tokenEndingAt(c.CursorOffset()); ok {
 			c.Input.SetCursor(c.cursorColumn() - span.length())
@@ -678,7 +679,7 @@ func (c *Composer) AcceptImage(h Host, msg PasteImageMsg, open bool) tea.Cmd {
 	}
 	if msg.NoImage {
 		cmd := c.removeImage(msg.ID)
-		return tea.Batch(cmd, PasteTextCmd(msg.Target, c.Gen))
+		return tea.Batch(cmd, h.Background(PasteTextCmd(msg.Target, c.Gen)))
 	}
 	att.Path = msg.Path
 	h.ClearErr()

@@ -2,6 +2,7 @@ package composer
 
 import (
 	"errors"
+	"github.com/YoanWai/agent-manager/internal/ui/effects"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -26,9 +27,9 @@ func TestSweepTickSweepsAgainAndRearms(t *testing.T) {
 		t.Fatal("tick must return work")
 	}
 	// A manager left open for weeks only keeps sweeping if the tick both
-	// sweeps and re-arms. The route answers the tick without reading root,
+	// sweeps and re-arms. The root admits the owned sweep,
 	// and running the timer itself would wait out the real interval.
-	cmd, handled := Update(nil, SweepTickMsg{})
+	cmd, handled := Update(&sweepRoot{}, SweepTickMsg{})
 	if !handled || cmd == nil {
 		t.Fatal("the tick went unhandled")
 	}
@@ -40,3 +41,11 @@ func TestSweepTickSweepsAgainAndRearms(t *testing.T) {
 		t.Fatalf("want sweep plus re-arm, got %d commands", len(batch))
 	}
 }
+
+type sweepRoot struct{ scope effects.Lifetime }
+
+func (r *sweepRoot) Background(cmd tea.Cmd) tea.Cmd { return effects.Leaf(&r.scope, cmd) }
+func (r *sweepRoot) ComposerFor(ID) *Composer       { panic("sweep must not read a composer") }
+func (r *sweepRoot) ComposerOpen(ID) bool           { panic("sweep must not read a composer") }
+func (r *sweepRoot) ReportErr(string)               { panic("tick must not report before sweep") }
+func (r *sweepRoot) ClearErr()                      { panic("tick must not change error state") }

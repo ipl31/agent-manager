@@ -68,6 +68,8 @@ func (m *Model) composerOpen(target composer.ID) bool {
 // pasteRoot is the root as the prompt boxes reach it.
 type pasteRoot struct{ m *Model }
 
+func (r pasteRoot) Background(cmd tea.Cmd) tea.Cmd { return r.m.Background(cmd) }
+
 func (r pasteRoot) ComposerFor(target composer.ID) *composer.Composer { return r.m.composerFor(target) }
 
 func (r pasteRoot) ComposerOpen(target composer.ID) bool { return r.m.composerOpen(target) }

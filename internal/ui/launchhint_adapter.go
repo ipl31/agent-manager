@@ -75,7 +75,7 @@ func (m *Model) startInstall(request uiinstall.StartRequest) bool {
 func (m *Model) handInstallScreenTo(sessionID string) tea.Cmd {
 	var cleanup tea.Cmd
 	if q := m.quick(); q != nil {
-		cleanup = uiinstall.CleanupImages(q.Attachments)
+		cleanup = m.Background(uiinstall.CleanupImages(q.Attachments))
 		q.Attachments = nil
 	}
 	m.closeLaunchHint()

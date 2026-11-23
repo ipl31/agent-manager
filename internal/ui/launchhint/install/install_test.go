@@ -31,6 +31,8 @@ type fakeRoot struct {
 	refreshes int
 }
 
+func (r *fakeRoot) Background(cmd tea.Cmd) tea.Cmd { return cmd }
+
 func (r *fakeRoot) ReportErr(text string) { r.errs = append(r.errs, text) }
 
 func (r *fakeRoot) ReportDone(text string) { r.dones = append(r.dones, text) }

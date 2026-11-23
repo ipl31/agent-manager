@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"github.com/YoanWai/agent-manager/internal/ui/effects"
 	"strings"
 	"testing"
 
@@ -24,7 +25,7 @@ type paneCursor struct {
 func paneAt(t *testing.T, lines ...string) *Model {
 	t.Helper()
 	preview := strings.Join(lines, "\n") + "\n"
-	m := &Model{}
+	m := &Model{effects: effectState{background: &effects.Lifetime{}}}
 	m.push(newFocusSurface(m))
 	m.workspace.preview = preview
 	m.focus.pane.Enter(uifocus.EnterContext{SessionID: "s1"})

@@ -56,7 +56,7 @@ func (m *Model) openSettingsWithReader(reader uipersist.Reader) tea.Cmd {
 	if s.Pending > 0 {
 		return probe
 	}
-	return tea.Batch(uipersist.LoadCmd(uipersist.LoadRequest{Target: uipersist.DialogTarget, Generation: s.Gen}, reader), probe)
+	return tea.Batch(m.Background(uipersist.LoadCmd(uipersist.LoadRequest{Target: uipersist.DialogTarget, Generation: s.Gen}, reader)), probe)
 }
 
 func (m *Model) handleSettingsLoaded(msg uipersist.LoadedMsg) (tea.Model, tea.Cmd) {
@@ -71,13 +71,13 @@ func (m *Model) applySettingsResult(d *uisettings.State, result uisettings.Resul
 	cmd := m.runSettingsResult(d, result)
 	switch result.Exit {
 	case uisettings.OpenDocs:
-		return openLink(docsURL), false
+		return m.openLink(docsURL), false
 	case uisettings.OpenFeatureRequest:
-		return openLink(uinotices.FeatureRequestURL()), false
+		return m.openLink(uinotices.FeatureRequestURL()), false
 	case uisettings.RequestCLISupport:
-		return openLink(uinotices.SupportRequestURL()), false
+		return m.openLink(uinotices.SupportRequestURL()), false
 	case uisettings.ReportBug:
-		return openLink(uinotices.BugReportURL(m.release.Version)), false
+		return m.openLink(uinotices.BugReportURL(m.release.Version)), false
 	case uisettings.OpenSetup:
 		request := openSetupMsg{Screen: m.screenID(), ForegroundGen: m.gens.foreground}
 		request.Screen.depth--
@@ -260,11 +260,11 @@ func (m *Model) applySettingsPrefs(d *uisettings.State) {
 
 func (m *Model) probeEditorsCmd() tea.Cmd {
 	resolution, generation := m.captureEditorResolution(), m.settings.Gen
-	return func() tea.Msg {
+	return m.Background(func() tea.Msg {
 		msg := editorProbe(resolution)
 		msg.Generation = generation
 		return msg
-	}
+	})
 }
 
 // probe walks PATH, which is I/O that Update must not do.
@@ -417,7 +417,7 @@ func (m *Model) runPromptsResult(d *uisettings.State, result uisettings.Result) 
 	case !ok:
 		return nil
 	case read:
-		return uipersist.SavedCmd(m.services.store, uipersist.SavedForSettings, request.Gen, request.DialogGen)
+		return m.Background(uipersist.SavedCmd(m.services.store, uipersist.SavedForSettings, request.Gen, request.DialogGen))
 	}
 	m.enqueueEffect(request, 0, false)
 	return m.nextEffectCmd()
@@ -652,7 +652,7 @@ func (h settingsSaveHost) SaveKeys(list, session keybind.Table, listChanged, ses
 	if sessionChanged {
 		m.services.keys = session
 		m.services.tmux.SetSessionKeys(session)
-		return func() tea.Msg { return m.refreshExistingSessionUX() }
+		return m.Background(func() tea.Msg { return m.refreshExistingSessionUX() })
 	}
 	return nil
 }

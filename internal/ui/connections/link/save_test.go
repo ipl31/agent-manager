@@ -2,6 +2,7 @@ package link
 
 import (
 	"errors"
+	backgroundeffects "github.com/YoanWai/agent-manager/internal/ui/effects"
 	"slices"
 	"testing"
 
@@ -71,7 +72,7 @@ func TestSaveWritesTheListAndReadsItBack(t *testing.T) {
 // A refused write keeps the card open and says why; nothing is adopted.
 func TestAFailedSaveKeepsTheCardAndSaysWhy(t *testing.T) {
 	refused := errors.New("UNIQUE constraint failed: connections.name")
-	state := New(remote.New(t.TempDir()), nil)
+	state := New(remote.New(t.TempDir()), nil, &backgroundeffects.Lifetime{})
 	root := &recorder{}
 	cmd := state.ApplySave(root, SaveRequest{Op: SaveAdd, Next: store.Connection{Name: "box"}, Gen: 7}, nil, refused)
 	if cmd != nil {
@@ -90,7 +91,7 @@ func TestAFailedSaveKeepsTheCardAndSaysWhy(t *testing.T) {
 
 // A rename moves the rail's row to the new name; a removal forgets it.
 func TestASavedListTellsTheRailWhatMoved(t *testing.T) {
-	state := New(remote.New(t.TempDir()), nil)
+	state := New(remote.New(t.TempDir()), nil, &backgroundeffects.Lifetime{})
 	added := []store.Connection{{Name: "lab", Destination: "me@box"}}
 
 	root := &recorder{}

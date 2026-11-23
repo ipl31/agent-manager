@@ -2,6 +2,7 @@ package capture
 
 import (
 	"errors"
+	backgroundeffects "github.com/YoanWai/agent-manager/internal/ui/effects"
 	"testing"
 	"time"
 
@@ -72,7 +73,7 @@ func TestIntervalFollowsTheSelectedStatus(t *testing.T) {
 // selection.
 func TestStaleSettleNeverWatchesOrCaptures(t *testing.T) {
 	root := &fakeRoot{hasSel: true, selected: store.Session{ID: "b"}, gen: 2, feeds: true}
-	s := New(nil, nil)
+	s := New(nil, nil, &backgroundeffects.Lifetime{})
 	cmd, ok := s.Route(root, SettleMsg{Gen: 1})
 	if !ok || cmd != nil {
 		t.Fatalf("stale settle = %v, %v; want handled with no work", cmd, ok)
@@ -84,7 +85,7 @@ func TestStaleSettleNeverWatchesOrCaptures(t *testing.T) {
 
 func TestCurrentSettleWatchesThenCaptures(t *testing.T) {
 	root := &fakeRoot{hasSel: true, selected: store.Session{ID: "a"}, gen: 1, feeds: true}
-	s := New(nil, nil)
+	s := New(nil, nil, &backgroundeffects.Lifetime{})
 	if _, ok := s.Route(root, SettleMsg{Gen: 1}); !ok {
 		t.Fatal("settle was not routed")
 	}
@@ -97,7 +98,7 @@ func TestCurrentSettleWatchesThenCaptures(t *testing.T) {
 // discarded, so the tick only re-arms.
 func TestTickSkipsACaptureTheWatcherAlreadyFeeds(t *testing.T) {
 	root := &fakeRoot{hasSel: true, selected: store.Session{ID: "a"}, gen: 1, feeds: true, serving: true}
-	s := New(nil, nil)
+	s := New(nil, nil, &backgroundeffects.Lifetime{})
 	if cmd, ok := s.Route(root, TickMsg{}); !ok || cmd != nil {
 		t.Fatalf("served tick = %v, %v; want handled with no capture", cmd, ok)
 	}
@@ -108,7 +109,7 @@ func TestTickSkipsACaptureTheWatcherAlreadyFeeds(t *testing.T) {
 
 func TestTickThatCapturesRedrawsTheFrame(t *testing.T) {
 	root := &fakeRoot{hasSel: true, selected: store.Session{ID: "a"}, gen: 1, feeds: true}
-	s := New(nil, nil)
+	s := New(nil, nil, &backgroundeffects.Lifetime{})
 	if cmd, ok := s.Route(root, TickMsg{}); !ok || cmd == nil {
 		t.Fatalf("tick = %v, %v; want a capture", cmd, ok)
 	}
@@ -119,7 +120,7 @@ func TestTickThatCapturesRedrawsTheFrame(t *testing.T) {
 
 func TestTickKeepsTheTimerWhileTheListIsHidden(t *testing.T) {
 	root := &fakeRoot{hasSel: true, selected: store.Session{ID: "a"}, gen: 1}
-	s := New(nil, nil)
+	s := New(nil, nil, &backgroundeffects.Lifetime{})
 	if _, ok := s.Route(root, TickMsg{}); !ok {
 		t.Fatal("a tick with no preview on screen was not handled")
 	}
@@ -127,7 +128,7 @@ func TestTickKeepsTheTimerWhileTheListIsHidden(t *testing.T) {
 
 func TestCaptureResultForAnotherSelectionIsDropped(t *testing.T) {
 	root := &fakeRoot{hasSel: true, selected: store.Session{ID: "b"}}
-	s := New(nil, nil)
+	s := New(nil, nil, &backgroundeffects.Lifetime{})
 	if _, ok := s.Route(root, Msg{SessID: "a", Preview: "old"}); !ok {
 		t.Fatal("capture was not routed")
 	}
@@ -140,7 +141,7 @@ func TestCaptureResultForAnotherSelectionIsDropped(t *testing.T) {
 // no longer looking at, even when its session is still the selected one.
 func TestCaptureFromAnOlderGenerationIsDropped(t *testing.T) {
 	root := &fakeRoot{hasSel: true, selected: store.Session{ID: "a"}, gen: 3}
-	s := New(nil, nil)
+	s := New(nil, nil, &backgroundeffects.Lifetime{})
 	if _, ok := s.Route(root, Msg{SessID: "a", Preview: "old", Gen: 2}); !ok {
 		t.Fatal("capture was not routed")
 	}
@@ -155,7 +156,7 @@ func TestCaptureFromAnOlderGenerationIsDropped(t *testing.T) {
 
 func TestCaptureErrorReachesTheStatusBar(t *testing.T) {
 	root := &fakeRoot{}
-	s := New(nil, nil)
+	s := New(nil, nil, &backgroundeffects.Lifetime{})
 	want := errors.New("no pane")
 	if _, ok := s.Route(root, Msg{Err: want}); !ok {
 		t.Fatal("capture error was not routed")
@@ -166,7 +167,7 @@ func TestCaptureErrorReachesTheStatusBar(t *testing.T) {
 }
 
 func TestHeldDraftWaitsForItsSessionToWork(t *testing.T) {
-	s := New(nil, nil)
+	s := New(nil, nil, &backgroundeffects.Lifetime{})
 	now := time.Now()
 	s.Hold(TypedPrompt{ID: "a", Text: "draft", At: now})
 	s.Hold(TypedPrompt{ID: "b", Text: "stale", At: now.Add(-2 * TypedPromptGrace)})
@@ -193,7 +194,7 @@ func TestHeldDraftWaitsForItsSessionToWork(t *testing.T) {
 
 // A draft whose session left the list has nothing left to commit.
 func TestHeldDraftForAGoneSessionIsDropped(t *testing.T) {
-	s := New(nil, nil)
+	s := New(nil, nil, &backgroundeffects.Lifetime{})
 	now := time.Now()
 	s.Hold(TypedPrompt{ID: "gone", Text: "draft", At: now})
 	s.Commit(nil, now, func(store.Session, string) { t.Fatal("a gone session's draft was recorded") })

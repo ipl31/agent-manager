@@ -9,6 +9,7 @@ import (
 // Root is what completing a suggestion asks of the manager: the top surface
 // with a directory field, and the probe a spawn form's new directory earns.
 type Root interface {
+	Background(tea.Cmd) tea.Cmd
 	PathCompleting() (Field, bool)
 	FormPathChanged() tea.Cmd
 }
@@ -23,7 +24,7 @@ func Apply(root Root, reader Reader) tea.Cmd {
 	}
 	path := field.Paths().Selected() + string(filepath.Separator)
 	field.TakePath(path)
-	completion := field.Paths().Request(field.PathTarget(), path, reader)
+	completion := root.Background(field.Paths().Request(field.PathTarget(), path, reader))
 	if field.PathTarget() == Form {
 		return tea.Batch(completion, root.FormPathChanged())
 	}

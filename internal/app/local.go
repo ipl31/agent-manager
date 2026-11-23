@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -72,5 +73,8 @@ func OpenLocal(profileDir string, driver *tmux.Driver) (*Local, error) {
 }
 
 func (l *Local) Close() error {
+	if err := l.Lifecycle.ClosePickers(context.Background()); err != nil {
+		return err
+	}
 	return l.Runtime.Store.Close()
 }

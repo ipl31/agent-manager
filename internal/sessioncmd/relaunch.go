@@ -35,19 +35,31 @@ const pickerInjectionTimeout = 45 * time.Second
 // drawing inline (agy) leaves its last frame, composer and all, in the pane
 // it exited.
 func InjectPickerKeys(driver *tmux.Driver, sessID string, tool config.Tool) {
+	if work := pickerKeysWorker(driver, sessID, tool); work != nil {
+		go work()
+	}
+}
+
+func (l *Lifecycle) injectPickerKeys(driver *tmux.Driver, sessID string, tool config.Tool) {
+	if work := pickerKeysWorker(driver, sessID, tool); work != nil {
+		l.pickers.start(work)
+	}
+}
+
+func pickerKeysWorker(driver *tmux.Driver, sessID string, tool config.Tool) func() {
 	composer := tool.InputPrefix
 	if composer == "" {
 		composer = tool.ActivityCutoff
 	}
 	keys := tool.ResumePickerKeys
 	if composer == "" || keys == "" {
-		return
+		return nil
 	}
 	re, err := regexp.Compile(composer)
 	if err != nil {
-		return
+		return nil
 	}
-	go func() {
+	return func() {
 		deadline := time.Now().Add(pickerInjectionTimeout)
 		for time.Now().Before(deadline) {
 			if !driver.Exists(sessID) {
@@ -66,7 +78,7 @@ func InjectPickerKeys(driver *tmux.Driver, sessID string, tool config.Tool) {
 			}
 			return
 		}
-	}()
+	}
 }
 
 const composerStabilityWindow = 1500 * time.Millisecond

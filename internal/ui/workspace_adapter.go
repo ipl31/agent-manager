@@ -274,9 +274,9 @@ func (m *Model) refreshExistingSessionUX() tea.Msg {
 // covers normal operation, this exists for tests and explicit refreshes.
 func (m *Model) refreshCmd() tea.Cmd {
 	m.syncPollInput()
-	return func() tea.Msg {
+	return m.Background(func() tea.Msg {
 		return m.poller.refreshOnce()
-	}
+	})
 }
 
 // listingFenced reports a listing no newer than the last committed mutation,

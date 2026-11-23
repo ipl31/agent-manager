@@ -192,15 +192,16 @@ func newView(deps Dependencies, version string) (*Model, error) {
 	if err := sessioncmd.ApplyBindingSettings(st, driver); err != nil {
 		return nil, err
 	}
+	background := &uieffects.Lifetime{}
 	model := &Model{
-		effects: effectState{Queue: uieffects.Queue{Lifetime: &uieffects.Lifetime{}}},
+		effects: effectState{background: background, Queue: uieffects.Queue{Lifetime: &uieffects.Lifetime{}}},
 		poller:  &poller{runner: deps.Execution},
 		layout:  layoutState{split: uigeometry.Gesture{Ratio: uigeometrypanes.Load(st)}},
 		env: environment{
 			workDir: uilaunch.InitialWorkingDir(),
 			homeDir: uilaunch.InitialHomeDir(),
 		},
-		release: uirelease.New(st, version),
+		release: uirelease.New(st, version, background),
 		services: services{
 			cfg:         cfg,
 			lifecycle:   deps.Lifecycle,
@@ -216,10 +217,10 @@ func newView(deps Dependencies, version string) (*Model, error) {
 			setSnapshot: st.SetSnapshot,
 		},
 		rail:      uirailpersist.Load(st),
-		ssh:       uilink.New(remote.New(deps.ProfileDir), connections),
+		ssh:       uilink.New(remote.New(deps.ProfileDir), connections, background),
 		settings:  uipersist.New(uipersist.StoreWriter{Store: st}, choiceSettingKeys(slices.Sorted(maps.Keys(cfg.Tools)))),
 		focus:     focusState{runtime: focusruntime.State{}, imeCursor: &uiframe.CursorAnchor{}},
-		workspace: workspace{capture: uicapture.New(st, driver)},
+		workspace: workspace{capture: uicapture.New(st, driver, background)},
 		startup: startupState{
 			Booting: true,
 		},
@@ -248,5 +249,5 @@ func newView(deps Dependencies, version string) (*Model, error) {
 
 func (m *Model) Init() tea.Cmd {
 	m.syncPollInput()
-	return tea.Batch(m.syncPaneTheme(), m.setupOnLaunch(), m.refreshExistingSessionUX, m.release.Check(), m.release.CheckStartupFeed(), uirelease.Tick(), m.bannerTick(), m.workspace.capture.Tick(previewCaptures{m}), m.startStartupTick(), uicomposer.SweepCmd, uicomposer.SweepTick(), uistartup.CheckPaneShell)
+	return tea.Batch(m.syncPaneTheme(), m.setupOnLaunch(), m.Background(m.refreshExistingSessionUX), m.release.Check(), m.release.CheckStartupFeed(), uirelease.Tick(), m.bannerTick(), m.workspace.capture.Tick(previewCaptures{m}), m.startStartupTick(), m.Background(uicomposer.SweepCmd), uicomposer.SweepTick(), m.Background(uistartup.CheckPaneShell))
 }

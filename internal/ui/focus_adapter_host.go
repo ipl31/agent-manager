@@ -75,12 +75,12 @@ func (h focusHost) Queued(id string, write uifocus.Write) tea.Cmd {
 func (h focusHost) Reported(report string, echo bool) { h.m.sendFocusReport(report, echo) }
 
 func (h focusHost) Copied(request uifocus.CopyRequest) tea.Cmd {
-	return copyTextCmd(request.Text, func(chars int) tea.Msg {
+	return h.m.Background(copyTextCmd(request.Text, func(chars int) tea.Msg {
 		return uifocus.CopiedMessage{Generation: request.Generation, Chars: chars}
-	})
+	}))
 }
 
-func (h focusHost) Opened(url string) (tea.Model, tea.Cmd) { return h.m, openLinkCmd(url) }
+func (h focusHost) Opened(url string) (tea.Model, tea.Cmd) { return h.m, h.m.openLinkCmd(url) }
 
 func (h focusHost) Region(request *uifocus.RegionRequest) tea.Cmd {
 	if request == nil {

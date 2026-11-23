@@ -18,8 +18,8 @@ var copyToClipboard = clipboard.WriteText
 // browser started on this host would open out of the user's sight.
 type LinkPageMsg struct{ URL string }
 
-func ShowLinkPage(url string) tea.Cmd {
-	return Exec(&LinkPage{URL: url}, func(err error) tea.Msg {
+func ShowLinkPage(lifetime ExecLifetime, url string) tea.Cmd {
+	return Exec(ownedLinkPage(lifetime, url), func(err error) tea.Msg {
 		if err != nil {
 			return LinkOpenErrMsg{Err: fmt.Errorf("show link: %w", err)}
 		}
@@ -53,4 +53,8 @@ func (p *LinkPage) Run() error {
 		return nil
 	}
 	return err
+}
+
+func ownedLinkPage(lifetime ExecLifetime, url string) tea.ExecCommand {
+	return ownedExec{ExecCommand: &LinkPage{URL: url}, lifetime: lifetime}
 }

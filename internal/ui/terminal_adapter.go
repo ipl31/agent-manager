@@ -227,11 +227,11 @@ func linkSeams() uiterminal.Seams {
 	}
 }
 
-func openLink(target string) tea.Cmd { return terminalMsgCmd(uiterminal.OpenLink(target, linkSeams())) }
+func (m *Model) openLink(target string) tea.Cmd { return m.Background(openLink(target)) }
+func (m *Model) openLinkCmd(url string) tea.Cmd { return m.Background(openLinkCmd(url)) }
+func openLink(target string) tea.Cmd            { return terminalMsgCmd(uiterminal.OpenLink(target, linkSeams())) }
+func openLinkCmd(url string) tea.Cmd            { return terminalMsgCmd(uiterminal.OpenLinkCmd(url, linkSeams())) }
 
-func openLinkCmd(url string) tea.Cmd { return terminalMsgCmd(uiterminal.OpenLinkCmd(url, linkSeams())) }
-
-// terminalMsgCmd turns a link's outcome into the message the root routes.
 func terminalMsgCmd(cmd tea.Cmd) tea.Cmd {
 	return func() tea.Msg {
 		switch msg := cmd().(type) {

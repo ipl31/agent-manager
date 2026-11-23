@@ -89,7 +89,7 @@ func (h quickBarHost) LoadCatalog(toolName string) tea.Cmd { return h.m.ensureCa
 func (h quickBarHost) Close() { h.m.closeQuick() }
 
 func (h quickBarHost) LoadSaved() tea.Cmd {
-	return uipersist.SavedCmd(h.m.services.store, uipersist.SavedForQuick, uint64(h.m.quick().Gen), 0)
+	return h.m.Background(uipersist.SavedCmd(h.m.services.store, uipersist.SavedForQuick, uint64(h.m.quick().Gen), 0))
 }
 
 func (h quickBarHost) Send(text string) tea.Cmd {

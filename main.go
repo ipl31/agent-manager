@@ -216,13 +216,29 @@ func runServe(out, errs io.Writer, args []string, dir string, start app.Starter)
 	if err != nil {
 		return err
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	owner, err := app.AcquireOwnership(ctx, dir, driver.SocketPath(), false, nil)
+	if errors.Is(err, app.ErrManagerBusy) {
+		fmt.Fprintln(out, "agent-manager serve:", err)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer owner.Close()
 	local, err := app.OpenLocal(dir, driver)
 	if err != nil {
 		return err
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	monitorCtx, cancelMonitor := context.WithCancel(ctx)
+	changed := make(chan error, 1)
+	go func() { err := owner.Changed(monitorCtx); changed <- err; stop() }()
 	local.Serve(ctx, errs)
+	cancelMonitor()
+	if reason := <-changed; reason != nil && !errors.Is(reason, context.Canceled) {
+		fmt.Fprintln(out, "agent-manager serve:", reason)
+	}
 	return local.Close()
 }
 
@@ -343,6 +359,20 @@ func run() (resultErr error) {
 	if err != nil {
 		return err
 	}
+	continuation, err := readContinuation(os.Args[1:])
+	if err != nil {
+		return err
+	}
+	owner, err := app.AcquireOwnership(context.Background(), dir, driver.SocketPath(), true, continuation)
+	if err != nil {
+		return err
+	}
+	releaseOwner := true
+	defer func() {
+		if releaseOwner {
+			owner.Close()
+		}
+	}()
 	local, err := app.OpenLocal(dir, driver)
 	if err != nil {
 		return err
@@ -361,6 +391,8 @@ func run() (resultErr error) {
 	if err != nil {
 		return err
 	}
+
+	model.SetOwnerID(owner.ID())
 
 	// Mouse reporting claims the wheel for the app, so a notch neither
 	// scrolls the host's scrollback out from under the manager nor arrives
@@ -387,41 +419,84 @@ func run() (resultErr error) {
 	ui.EnableTerminalPassthrough()
 	ui.SyncTerminalColors()
 	ctx, cancel := context.WithCancel(context.Background())
+	monitorDone := make(chan struct{})
+	go func() {
+		defer close(monitorDone)
+		reason := owner.Changed(ctx)
+		if ctx.Err() == nil {
+			program.Send(ui.TakeoverMsg{Owner: owner.ID(), Reason: reason})
+		}
+	}()
 	done := model.StartPoller(ctx, program.Send)
-	var stopOnce sync.Once
-	stopRuntime := func() {
-		stopOnce.Do(func() {
-			model.StopEffects()
-			cancel()
-			if len(model.AbandonedEffects()) > 0 {
-				// Abandoned workers keep their resources until the process exits.
-				closeLocal = false
-				return
-			}
-			<-done
-		})
-	}
-	defer stopRuntime()
 	final, runErr := program.Run()
-	catalog.StopAll()
 	ui.ResetTerminalColors()
 	ui.ResetPointer()
 	runErr = errors.Join(runErr, ui.DisableColorSchemeReports())
-	stopRuntime()
-	if abandoned := model.AbandonedEffects(); len(abandoned) > 0 && runErr == nil {
-		runErr = fmt.Errorf("quit before these finished, so check their result: %s", strings.Join(abandoned, "; "))
+	cancel()
+	model.CloseRuntimeAdmission()
+	shutdown := startRuntimeShutdown(func(shutdownCtx context.Context) error {
+		catalogErr := catalog.Close(shutdownCtx)
+		modelErr := model.ConfirmShutdown(shutdownCtx)
+		controlErr := driver.CloseControls(shutdownCtx)
+		<-done
+		<-monitorDone
+		return errors.Join(catalogErr, modelErr, controlErr)
+	})
+	forceCtx, stopForce := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopForce()
+	forced := awaitRuntimeShutdown(shutdown.done, forceCtx.Done(), model.ForcedQuit() || errors.Is(runErr, tea.ErrInterrupted), 5*time.Second, func() {
+		reason := "quitting"
+		if model.TakenOver() {
+			reason = "takeover"
+		} else if model.RestartPath() != "" {
+			reason = "restarting"
+		}
+		fmt.Fprintf(os.Stderr, "agent-manager: waiting for active work to finish before %s; Ctrl+C forces exit\n", reason)
+	})
+	if forced {
+		// Even an explicit force never authorizes self-restart. A child
+		// may outlive this process; this is not a clean handoff claim.
+		select {
+		case <-shutdown.done:
+		default:
+			closeLocal = false
+			releaseOwner = false
+			owner.RetainUntilExit(local, model, program, shutdown)
+			runErr = errors.Join(runErr, shutdown.uncertainty(), errors.New("forced exit before active work finished; check its result"))
+		}
 	}
-	if runErr == nil {
+
+	if abandoned := model.AbandonedEffects(); len(abandoned) > 0 {
+		runErr = errors.Join(runErr, fmt.Errorf("quit before these finished, so check their result: %s", strings.Join(abandoned, "; ")))
+	}
+	if model.TakenOver() {
+		reason := model.TakeoverReason()
+		if reason == nil {
+			reason = app.ErrManagerSuperseded
+		}
+		fmt.Fprintln(os.Stderr, "agent-manager:", reason)
+		if !errors.Is(reason, app.ErrManagerSuperseded) {
+			runErr = errors.Join(runErr, reason)
+		}
+		return runErr
+	}
+	if runErr == nil && !forced {
 		if finished, ok := final.(*ui.Model); ok && finished.RestartPath() != "" {
-			// A self-update swapped the binary on disk; restart hands over
-			// to the new build so the manager comes back updated without
-			// touching the tmux sessions it manages. On Windows this process
-			// waits as the new one's parent, so its poll stops first.
-			stopRuntime()
+			request, err := owner.ReserveContinuation(context.Background())
+			if errors.Is(err, app.ErrManagerSuperseded) {
+				fmt.Fprintln(os.Stderr, "agent-manager: another manager took over this profile and server")
+				return nil
+			}
+			if err != nil {
+				return err
+			}
 			if err := local.Close(); err != nil {
 				return err
 			}
-			return restart(finished.RestartPath())
+			closeLocal = false
+			owner.ReleaseContinuation()
+			releaseOwner = false
+			return restart(finished.RestartPath(), continuationArgs(request))
 		}
 	}
 	return runErr

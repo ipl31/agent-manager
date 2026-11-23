@@ -755,7 +755,7 @@ func seedReviewPickerModel(t *testing.T, m *Model, targetID, root string) {
 
 func TestReviewPickerReadsRunOnlyInsideCommands(t *testing.T) {
 	t.Run("branches", func(t *testing.T) {
-		m := &Model{}
+		m := &Model{effects: effectState{background: &uieffects.Lifetime{}}}
 		seedReviewPickerModel(t, m, "s1", "/raw/repo")
 		reader := &scriptedReviewPickerReader{
 			worktrees: []git.Worktree{{Root: "/actual/main", Branch: "main"}, {Root: "/actual/feature", Branch: "feature"}},
@@ -782,7 +782,7 @@ func TestReviewPickerReadsRunOnlyInsideCommands(t *testing.T) {
 	})
 
 	t.Run("bases", func(t *testing.T) {
-		m := &Model{}
+		m := &Model{effects: effectState{background: &uieffects.Lifetime{}}}
 		seedReviewPickerModel(t, m, "s2", "/raw/repo")
 		reader := &scriptedReviewPickerReader{
 			refs: []string{"main", "feature"}, base: "feature",
@@ -821,7 +821,7 @@ func TestReviewPickerCompletionCannotStealNewerUI(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			m := &Model{}
+			m := &Model{effects: effectState{background: &uieffects.Lifetime{}}}
 			seedReviewPickerModel(t, m, "s1", "/repo")
 			reader := &scriptedReviewPickerReader{worktrees: []git.Worktree{{Root: "/repo", Branch: "main"}}}
 			msg := m.openBranchPickWithReader(reader)().(uireviewsource.PickerLoadedMsg)

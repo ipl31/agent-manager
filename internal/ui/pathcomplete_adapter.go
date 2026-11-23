@@ -18,7 +18,7 @@ func (m *Model) completer(target pathcomplete.Target) *pathcomplete.State {
 }
 
 func (m *Model) requestPathSuggestions(target pathcomplete.Target, typed string) tea.Cmd {
-	return m.completer(target).Request(target, typed, pathcomplete.SystemReader{})
+	return m.Background(m.completer(target).Request(target, typed, pathcomplete.SystemReader{}))
 }
 
 // pathCompleter is the root as the completer reads it: the value of the path
@@ -54,6 +54,8 @@ func (m *Model) topPathCompleting() (pathcomplete.Field, bool) {
 
 // pathRoot is the root as the completer reaches it.
 type pathRoot struct{ m *Model }
+
+func (r pathRoot) Background(cmd tea.Cmd) tea.Cmd { return r.m.Background(cmd) }
 
 func (r pathRoot) PathCompleting() (pathcomplete.Field, bool) {
 	return r.m.topPathCompleting()

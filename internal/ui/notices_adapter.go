@@ -269,7 +269,7 @@ func (r noticesRoot) PaintNoticesCard(card []string, foot []presentation.Painted
 
 func (r noticesRoot) TakeForeground() { r.takeForeground() }
 
-func (r noticesRoot) OpenLink(url string) tea.Cmd { return openLink(url) }
+func (r noticesRoot) OpenLink(url string) tea.Cmd { return r.openLink(url) }
 
 // releaseRoot is the root as a routed release, feed or self-update result
 // reaches it.
@@ -280,6 +280,9 @@ func (r releaseRoot) ApplyNotices(apply func()) { r.applyNotices(apply) }
 func (r releaseRoot) KeepNoticeSelection(apply func()) { r.keepNoticeSelection(apply) }
 
 func (r releaseRoot) Quit() tea.Cmd {
+	if r.effects.Quitting {
+		return nil
+	}
 	_, cmd := r.requestQuit()
 	return cmd
 }

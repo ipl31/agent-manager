@@ -112,8 +112,10 @@ type process struct {
 // running lets a caller exiting mid-answer stop CLIs its signals never reach.
 var running = struct {
 	sync.Mutex
-	procs map[*process]struct{}
-}{procs: map[*process]struct{}{}}
+	procs   map[*process]struct{}
+	pending map[*process]struct{}
+	closing bool
+}{procs: map[*process]struct{}{}, pending: map[*process]struct{}{}}
 
 // StopAll ends every CLI still answering.
 func StopAll() {
@@ -154,18 +156,25 @@ func startArgs(name string, args []string, dir string, server bool, env ...strin
 	if err != nil {
 		return nil, err
 	}
+	running.Lock()
+	if running.closing {
+		running.Unlock()
+		return nil, errors.New("catalog runtime has stopped")
+	}
 	if err := cmd.Start(); err != nil {
+		running.Unlock()
 		return nil, err
 	}
 	tree, err := adoptTree(cmd)
 	if err != nil {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
+		running.Unlock()
 		return nil, err
 	}
 	proc := &process{cmd: cmd, tree: tree, stdin: stdin, lines: make(chan []byte, 64), quit: make(chan struct{}), exited: make(chan struct{})}
-	running.Lock()
 	running.procs[proc] = struct{}{}
+	running.pending[proc] = struct{}{}
 	running.Unlock()
 	go proc.readLines(bufio.NewReaderSize(stdout, 1<<20))
 	return proc, nil
@@ -184,6 +193,9 @@ func (p *process) readLines(out *bufio.Reader) {
 			p.waitErr = p.cmd.Wait()
 			close(p.lines)
 			close(p.exited)
+			running.Lock()
+			delete(running.pending, p)
+			running.Unlock()
 			return
 		}
 	}

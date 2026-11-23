@@ -704,7 +704,7 @@ func TestRemoteActionsTheHostCannotTakeAreRefusedHere(t *testing.T) {
 func TestClicksOnTheConnectionDialog(t *testing.T) {
 	m := buildModel(t)
 	m.layout.width, m.layout.height = 120, 40
-	m.ssh = uilink.New(testRemoteClient(t), nil)
+	m.ssh = uilink.New(testRemoteClient(t), nil, m.effects.background)
 	m.openConnectionDialog(remote.Connection{})
 	for _, tc := range []struct {
 		label string
@@ -739,7 +739,7 @@ func openConnectionModel(t *testing.T) *Model {
 	t.Helper()
 	m := buildModel(t)
 	m.layout.width, m.layout.height = 120, 40
-	m.ssh = uilink.New(testRemoteClient(t), nil)
+	m.ssh = uilink.New(testRemoteClient(t), nil, m.effects.background)
 	m.applyTestMsg(t, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("C")})
 	if !m.connectionDialogOpen() {
 		t.Fatal("the new connection key did not open the card")
@@ -800,7 +800,7 @@ func TestConnectionSaveCompletionIsFenced(t *testing.T) {
 
 func TestNewConnectionKeyOpensTheDialogAndSavesToTheStore(t *testing.T) {
 	m := buildModel(t)
-	m.ssh = uilink.New(testRemoteClient(t), nil)
+	m.ssh = uilink.New(testRemoteClient(t), nil, m.effects.background)
 	m.applyTestMsg(t, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("C")})
 	if !m.connectionDialogOpen() {
 		t.Fatal("C did not open the card")
@@ -834,7 +834,7 @@ func TestNewConnectionKeyOpensTheDialogAndSavesToTheStore(t *testing.T) {
 
 func TestAFailedConnectionSaveTakesEnterAgain(t *testing.T) {
 	m := buildModel(t)
-	m.ssh = uilink.New(testRemoteClient(t), nil)
+	m.ssh = uilink.New(testRemoteClient(t), nil, m.effects.background)
 	if err := m.services.store.AddConnection(store.Connection{Name: "box", Destination: "me@elsewhere"}); err != nil {
 		t.Fatal(err)
 	}
@@ -940,7 +940,7 @@ func listedModel(t *testing.T, fake *fakeSSH) *Model {
 	t.Helper()
 	m := buildModel(t)
 	fake.snapshot = boxSnapshot()
-	m.ssh = uilink.New(testRemoteClient(t, remote.WithRunner(fake.run)), []store.Connection{{Name: "box", Destination: "me@box"}})
+	m.ssh = uilink.New(testRemoteClient(t, remote.WithRunner(fake.run)), []store.Connection{{Name: "box", Destination: "me@box"}}, m.effects.background)
 	m.rebuildRows()
 	return m
 }

@@ -57,6 +57,7 @@ type Runner struct {
 	// captureBusy guards the single in-flight id-capture goroutine.
 	captureBusy atomic.Bool
 	captureWait sync.WaitGroup
+	notifyWait  sync.WaitGroup
 	running     atomic.Bool
 	stopped     bool
 
@@ -205,7 +206,7 @@ func (p *Runner) run(ctx context.Context, step func() Result) <-chan Result {
 	}
 	go func() {
 		defer close(results)
-		defer func() { p.runMu.Lock(); p.stopped = true; p.runMu.Unlock(); p.captureWait.Wait() }()
+		defer func() { p.runMu.Lock(); p.stopped = true; p.runMu.Unlock(); p.captureWait.Wait(); p.notifyWait.Wait() }()
 		ticker := time.NewTicker(p.interval)
 		defer ticker.Stop()
 		for {

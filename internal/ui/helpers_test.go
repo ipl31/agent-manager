@@ -799,6 +799,7 @@ func shotModel() *Model {
 		{depth: 2, sess: sessions[5]},
 	}
 	m := &Model{
+		effects: effectState{background: &uieffects.Lifetime{}},
 		layout: layoutState{
 			width:  120,
 			height: 34,

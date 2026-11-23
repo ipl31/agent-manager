@@ -2,6 +2,7 @@ package link
 
 import (
 	"context"
+	"github.com/YoanWai/agent-manager/internal/ui/effects"
 	"os/exec"
 	"time"
 
@@ -22,7 +23,8 @@ const remoteTerminalTool = "terminal"
 // in flight and the selected row's screen, next to the client that
 // refreshes and calls the hosts.
 type State struct {
-	Client *remote.Client
+	background *effects.Lifetime
+	Client     *remote.Client
 	uiconnections.Connections
 }
 
@@ -52,8 +54,11 @@ type Root interface {
 	ReportDone(text string)
 }
 
-func New(client *remote.Client, stored []store.Connection) State {
-	state := State{Client: client}
+func New(client *remote.Client, stored []store.Connection, background *effects.Lifetime) State {
+	if background == nil {
+		panic("connections require an owned background lifetime")
+	}
+	state := State{Client: client, background: background}
 	state.SetList(stored)
 	return state
 }
@@ -178,9 +183,9 @@ func (s *State) PollHost(host string) tea.Cmd {
 		return nil
 	}
 	client, gen := s.Client, s.Gen()
-	return func() tea.Msg {
+	return effects.Leaf(s.background, func() tea.Msg {
 		return RefreshMsg{Host: host, Gen: gen, State: Facts(client.Refresh(context.Background(), host))}
-	}
+	})
 }
 
 // Poll refreshes every connection that has no refresh in flight. It rides
@@ -218,20 +223,20 @@ func (s *State) Read() tea.Cmd {
 		return nil
 	}
 	client := s.Client
-	return func() tea.Msg {
+	return effects.Leaf(s.background, func() tea.Msg {
 		text, err := client.ReadScreen(read.Ctx, read.Ref, read.Terminal)
 		return PreviewMsg{Read: read, Text: text, Err: err}
-	}
+	})
 }
 
 // Attach builds the SSH attach to the row's tmux session in this terminal,
 // off the update path.
 func (s *State) Attach(row uiconnections.Row) tea.Cmd {
 	client, ref := s.Client, row.Ref
-	return func() tea.Msg {
+	return effects.Leaf(s.background, func() tea.Msg {
 		cmd, err := client.AttachCommand(ref)
 		return AttachReadyMsg{Host: ref.Host, Cmd: cmd, Err: err}
-	}
+	})
 }
 
 func (s *State) Route(root Root, msg tea.Msg) (tea.Cmd, bool) {
@@ -264,7 +269,7 @@ func (s *State) attachReady(root Root, msg AttachReadyMsg) tea.Cmd {
 		return nil
 	}
 	host := msg.Host
-	return uiterminal.ExecProcess(msg.Cmd, func(err error) tea.Msg { return AttachDoneMsg{Host: host, Err: err} })
+	return uiterminal.OwnedExecProcess(s.background, msg.Cmd, func(err error) tea.Msg { return AttachDoneMsg{Host: host, Err: err} })
 }
 
 // attachDone reports how the attach ended and picks the host and its screen

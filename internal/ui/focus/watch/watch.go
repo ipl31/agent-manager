@@ -83,6 +83,7 @@ type Watcher struct {
 	input   chan struct{}
 	control *tmux.Control
 	closed  bool
+	closing map[*tmux.Control]error
 	running sync.WaitGroup
 	// polled marks a watcher serving id with forked captures, for a
 	// multiplexer whose control client is not used.
@@ -251,7 +252,27 @@ func (w *Watcher) CloseContext(ctx context.Context) error {
 	}()
 	select {
 	case <-done:
-		return nil
+		w.mu.Lock()
+		controls := make([]*tmux.Control, 0, len(w.closing))
+		for control := range w.closing {
+			controls = append(controls, control)
+		}
+		w.mu.Unlock()
+		var errs []error
+		for _, control := range controls {
+			err := control.CloseContext(ctx)
+			w.mu.Lock()
+			if err == nil {
+				delete(w.closing, control)
+			} else {
+				w.closing[control] = err
+			}
+			w.mu.Unlock()
+			if err != nil {
+				errs = append(errs, err)
+			}
+		}
+		return errors.Join(errs...)
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -404,16 +425,31 @@ func (w *Watcher) watch(ctx context.Context, id string, stop <-chan struct{}, in
 	}
 	closeControl := func() {
 		closeCtx, cancelClose := context.WithTimeout(context.Background(), controlCallTimeout)
-		_ = control.CloseContext(closeCtx)
+		err := control.CloseContext(closeCtx)
 		cancelClose()
+		w.mu.Lock()
+		if err == nil {
+			delete(w.closing, control)
+		} else {
+			if w.closing == nil {
+				w.closing = make(map[*tmux.Control]error)
+			}
+			w.closing[control] = err
+		}
+		w.mu.Unlock()
 	}
 	defer closeControl()
 	// A Bubble Tea send normally unblocks when its program stops, but the sink
 	// is an injected synchronous callback and may block forever. Cancellation
 	// must still detach and reap the control client without waiting for this
 	// goroutine to reach its defer.
-	stopCancelClose := context.AfterFunc(ctx, closeControl)
-	defer stopCancelClose()
+	cancelCloseDone := make(chan struct{})
+	stopCancelClose := context.AfterFunc(ctx, func() { defer close(cancelCloseDone); closeControl() })
+	defer func() {
+		if !stopCancelClose() {
+			<-cancelCloseDone
+		}
+	}()
 	w.mu.Lock()
 	if w.stop == stop {
 		w.control = control
