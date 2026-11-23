@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	backgroundeffects "github.com/YoanWai/agent-manager/internal/ui/effects"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -37,7 +36,7 @@ func noticeStore(t *testing.T) *store.Store {
 }
 
 func noticeModel(st *store.Store, version string) *Model {
-	background := &backgroundeffects.Lifetime{}
+	background := &uieffects.Lifetime{}
 	release := uirelease.New(st, version, background)
 	release.Feed = []feed.Message{{ID: noticeTip, Title: "A tip", Body: []string{"details"}, URL: "https://example.com/tip"}}
 	return &Model{
