@@ -46,31 +46,23 @@ func (d *Driver) RenameWorktreeBranch(root, path, branch, newName string) (strin
 	if name == "" {
 		return "", fmt.Errorf("session name %q leaves nothing usable for a worktree branch", newName)
 	}
-	return d.moveWorktreeBranch(root, path, branch, "am/"+name)
+	return d.moveWorktreeBranch(root, path, branch, "am/"+name, false)
 }
 
 // RestoreWorktreeBranch moves a worktree that RenameWorktreeBranch put on
 // branch back to original, by that exact name, with the same guarantees.
+// An original the rename kept because its delete failed is taken back
+// when it still holds the commit branch is on, and the copy goes.
 func (d *Driver) RestoreWorktreeBranch(root, path, branch, original string) (string, error) {
-	return d.moveWorktreeBranch(root, path, branch, original)
+	return d.moveWorktreeBranch(root, path, branch, original, true)
 }
 
-func (d *Driver) moveWorktreeBranch(root, path, branch, newBranch string) (string, error) {
+func (d *Driver) moveWorktreeBranch(root, path, branch, newBranch string, restore bool) (string, error) {
 	if newBranch == branch {
 		return branch, nil
 	}
 	if _, err := os.Stat(path); err != nil {
 		if !os.IsNotExist(err) {
-			return "", err
-		}
-		return branch, nil
-	}
-	oldRef := "refs/heads/" + branch
-	tip, err := d.run(root, "rev-parse", "--verify", "--quiet", oldRef)
-	if err != nil {
-		// --verify --quiet exits 1 when the ref is absent; anything else is a real failure.
-		var exitErr *exec.ExitError
-		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
 			return "", err
 		}
 		return branch, nil
@@ -84,11 +76,32 @@ func (d *Driver) moveWorktreeBranch(root, path, branch, newBranch string) (strin
 		}
 		return branch, nil
 	}
+	// A rename whose store write failed and could not be undone leaves the
+	// worktree already on newBranch; the caller records it this time.
+	if currentBranch == newBranch {
+		return newBranch, nil
+	}
 	if currentBranch != branch {
 		return branch, nil
 	}
-	if _, err := d.run(root, "rev-parse", "--verify", "--quiet", "refs/heads/"+newBranch); err == nil {
+	oldRef, newRef := "refs/heads/"+branch, "refs/heads/"+newBranch
+	tip, err := d.refTip(root, oldRef)
+	if err != nil || tip == "" {
+		return branch, err
+	}
+	kept, err := d.refTip(root, newRef)
+	if err != nil {
+		return "", err
+	}
+	if kept != "" && (!restore || kept != tip) {
 		return "", fmt.Errorf("branch already exists: %s", newBranch)
+	}
+	if kept != "" {
+		if n, err := d.checkouts(root, newRef); err != nil {
+			return "", err
+		} else if n > 0 {
+			return "", fmt.Errorf("branch %s is checked out in another worktree", newBranch)
+		}
 	}
 	// Git lets a branch be checked out twice (--ignore-other-worktrees), and
 	// deleting it would leave the other checkout on a missing branch.
@@ -101,7 +114,7 @@ func (d *Driver) moveWorktreeBranch(root, path, branch, newBranch string) (strin
 	if err != nil {
 		return "", err
 	}
-	if err := d.moveCheckedOutBranch(root, path, branch, newBranch, tip, symref); err != nil {
+	if err := d.moveCheckedOutBranch(root, path, branch, newBranch, tip, symref, kept == ""); err != nil {
 		var cleanup *BranchCleanupError
 		if errors.As(err, &cleanup) {
 			return newBranch, err
@@ -119,20 +132,30 @@ func (d *Driver) moveWorktreeBranch(root, path, branch, newBranch string) (strin
 // locked at tip, read from the source before the copy existed, while HEAD
 // moves: a commit racing the rename lands on one branch or fails to lock,
 // and a destination another writer moved or deleted stops the rename.
-func (d *Driver) moveCheckedOutBranch(root, path, branch, newBranch, tip string, symref bool) error {
+// Without publish, newBranch already exists at tip (an original a failed
+// cleanup kept) and stays if HEAD cannot move onto it.
+func (d *Driver) moveCheckedOutBranch(root, path, branch, newBranch, tip string, symref, publish bool) error {
 	oldRef, newRef := "refs/heads/"+branch, "refs/heads/"+newBranch
-	// -c carries the branch config and reflog, as -m does.
-	if _, err := d.run(root, "branch", "-c", branch, newBranch); err != nil {
-		return err
+	undo := func() error { return nil }
+	if publish {
+		undo = func() error { return d.dropBranch(root, newBranch, tip) }
+		// -c carries the branch config and reflog, as -m does. It can copy
+		// the ref and then fail on the config, which leaves a copy to undo.
+		if _, err := d.run(root, "branch", "-c", branch, newBranch); err != nil {
+			if copied, lookErr := d.refTip(root, newRef); lookErr != nil || copied == "" {
+				return errors.Join(err, lookErr)
+			}
+			return errors.Join(err, undo())
+		}
 	}
 	release, err := d.holdRefs(root, tip, oldRef, newRef)
 	if err != nil {
-		return errors.Join(fmt.Errorf("branch %s or %s changed or is in use by another git command: %w", branch, newBranch, err), d.dropBranch(root, newBranch, tip))
+		return errors.Join(fmt.Errorf("branch %s or %s changed or is in use by another git command: %w", branch, newBranch, err), undo())
 	}
 	err = d.pointHead(path, oldRef, newRef, symref)
 	releaseErr := release()
 	if err != nil {
-		return errors.Join(err, releaseErr, d.dropBranch(root, newBranch, tip))
+		return errors.Join(err, releaseErr, undo())
 	}
 	// HEAD is on the new branch, so the rename has happened and the caller
 	// must record it, along with anything the cleanup had to leave.
@@ -202,10 +225,32 @@ func (d *Driver) dropBranch(root, branch, tip string) error {
 	if _, err := d.run(root, "update-ref", "-d", ref, tip); err != nil {
 		return fmt.Errorf("kept branch %s: %w", branch, err)
 	}
+	// Git does not stop a delete of a branch another worktree checked out
+	// after the count above. Put it back, create-only, for that checkout,
+	// which could find it missing only between the delete and this write.
+	// Its reflog went with the delete.
+	if n, err := d.checkouts(root, ref); err != nil || n > 0 {
+		_, createErr := d.run(root, "update-ref", ref, tip, "")
+		return errors.Join(fmt.Errorf("kept branch %s: a worktree checked it out while it was deleted", branch), err, createErr)
+	}
 	if err := d.dropBranchConfig(root, branch); err != nil {
 		return fmt.Errorf("kept the config of deleted branch %s: %w", branch, err)
 	}
 	return nil
+}
+
+// refTip returns the commit ref points at, "" when it does not exist.
+func (d *Driver) refTip(root, ref string) (string, error) {
+	tip, err := d.run(root, "rev-parse", "--verify", "--quiet", ref)
+	if err != nil {
+		// --verify --quiet exits 1 when the ref is absent; anything else is a real failure.
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			return "", nil
+		}
+		return "", err
+	}
+	return tip, nil
 }
 
 // boundedCommand is git that ctx can stop. Stopping signals git's whole
