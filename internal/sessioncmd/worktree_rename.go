@@ -62,7 +62,11 @@ func RenameWorktreeBranch(gitDrv *git.Driver, st worktreeRenameStore, sess *stor
 		// The restore is itself a guarded rename: it moves the worktree back
 		// only while it is still on branch and no other checkout has taken
 		// it, and otherwise reports where git and the store now differ.
-		restored, restoreErr := gitDrv.RestoreWorktreeBranch(sess.WorktreeRepo, sess.Cwd, branch, original)
+		keptTip := ""
+		if cleanup != nil {
+			keptTip = cleanup.KeptTip
+		}
+		restored, restoreErr := gitDrv.RestoreWorktreeBranch(sess.WorktreeRepo, sess.Cwd, branch, original, keptTip)
 		if restoreErr != nil && !errors.As(restoreErr, &cleanup) {
 			return fmt.Errorf("%w; the worktree stays on git branch %s, the session records %s: %w", saveErr, branch, original, restoreErr)
 		}

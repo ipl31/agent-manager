@@ -20,6 +20,10 @@ import (
 type BranchCleanupError struct {
 	Branch string
 	Err    error
+	// KeptTip is the commit the old branch was left at when the rename
+	// could not delete it. Only this rename's caller knows the branch is
+	// its own, so only it hands KeptTip back to RestoreWorktreeBranch.
+	KeptTip string
 }
 
 func (e *BranchCleanupError) Error() string {
@@ -46,18 +50,21 @@ func (d *Driver) RenameWorktreeBranch(root, path, branch, newName string) (strin
 	if name == "" {
 		return "", fmt.Errorf("session name %q leaves nothing usable for a worktree branch", newName)
 	}
-	return d.moveWorktreeBranch(root, path, branch, "am/"+name, false)
+	return d.moveWorktreeBranch(root, path, branch, "am/"+name, "")
 }
 
 // RestoreWorktreeBranch moves a worktree that RenameWorktreeBranch put on
 // branch back to original, by that exact name, with the same guarantees.
-// An original the rename kept because its delete failed is taken back
-// when it still holds the commit branch is on, and the copy goes.
-func (d *Driver) RestoreWorktreeBranch(root, path, branch, original string) (string, error) {
-	return d.moveWorktreeBranch(root, path, branch, original, true)
+// keptTip is the BranchCleanupError.KeptTip of the rename being undone,
+// or "". An original that rename kept at keptTip is taken back while it
+// still holds that commit, the one branch is on, and the copy goes. Any
+// other existing original, even at the same commit, belongs to someone
+// else and is refused as a taken name.
+func (d *Driver) RestoreWorktreeBranch(root, path, branch, original, keptTip string) (string, error) {
+	return d.moveWorktreeBranch(root, path, branch, original, keptTip)
 }
 
-func (d *Driver) moveWorktreeBranch(root, path, branch, newBranch string, restore bool) (string, error) {
+func (d *Driver) moveWorktreeBranch(root, path, branch, newBranch, keptTip string) (string, error) {
 	if newBranch == branch {
 		return branch, nil
 	}
@@ -93,7 +100,7 @@ func (d *Driver) moveWorktreeBranch(root, path, branch, newBranch string, restor
 	if err != nil {
 		return "", err
 	}
-	if kept != "" && (!restore || kept != tip) {
+	if kept != "" && (kept != keptTip || kept != tip) {
 		return "", fmt.Errorf("branch already exists: %s", newBranch)
 	}
 	if kept != "" {
@@ -160,7 +167,11 @@ func (d *Driver) moveCheckedOutBranch(root, path, branch, newBranch, tip string,
 	// HEAD is on the new branch, so the rename has happened and the caller
 	// must record it, along with anything the cleanup had to leave.
 	if err := errors.Join(releaseErr, d.dropBranch(root, branch, tip)); err != nil {
-		return &BranchCleanupError{Branch: newBranch, Err: err}
+		cleanup := &BranchCleanupError{Branch: newBranch, Err: err}
+		if left, lookErr := d.refTip(root, oldRef); lookErr == nil && left == tip {
+			cleanup.KeptTip = tip
+		}
+		return cleanup
 	}
 	return nil
 }

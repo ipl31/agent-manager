@@ -402,13 +402,14 @@ exit 0
 		t.Fatal(err)
 	}
 	branch, err := f.driver.RenameWorktreeBranch(f.root, f.path, "am/old", "new")
-	if branch != "am/new" || !errors.As(err, new(*BranchCleanupError)) {
-		t.Fatalf("setup rename: branch=%q err=%v state=%+v", branch, err, f.state(t))
+	var cleanup *BranchCleanupError
+	if branch != "am/new" || !errors.As(err, &cleanup) || cleanup.KeptTip != f.a {
+		t.Fatalf("setup rename: branch=%q err=%v cleanup=%+v state=%+v", branch, err, cleanup, f.state(t))
 	}
 	if err := os.Remove(marker); err != nil {
 		t.Fatal(err)
 	}
-	restored, err := f.driver.RestoreWorktreeBranch(f.root, f.path, "am/new", "am/old")
+	restored, err := f.driver.RestoreWorktreeBranch(f.root, f.path, "am/new", "am/old", cleanup.KeptTip)
 	got := f.state(t)
 	if err != nil || restored != "am/old" || got.Head != "refs/heads/am/old" || got.Old != f.a || got.OldConfig != "original" ||
 		got.New != "" || got.NewConfig != "" {
@@ -429,5 +430,22 @@ func TestRenameWorktreeBranchRecreatesAnOldBranchCheckedOutDuringItsDelete(t *te
 		!strings.Contains(err.Error(), "am/old") || got.Head != "refs/heads/am/new" || got.New != f.a ||
 		got.MainHead != "refs/heads/am/old" || !got.MainResolves || got.Old != f.a || got.OldConfig != "original" {
 		t.Fatalf("branch=%q err=%v witness=%q\nstate=%+v", branch, err, witness, got)
+	}
+}
+
+// R2-2: an original someone else created again, even at the same commit,
+// is not the rename's to take back. Without the kept tip of the rename
+// being undone, the restore refuses it as a taken name.
+func TestRestoreWorktreeBranchRefusesAnOriginalSomeoneElseCreated(t *testing.T) {
+	f := newRenameFixture(t)
+	if branch, err := f.driver.RenameWorktreeBranch(f.root, f.path, "am/old", "new"); err != nil || branch != "am/new" {
+		t.Fatalf("setup rename: %q %v", branch, err)
+	}
+	gitIn(t, f.root, "branch", "am/old", f.a)
+	restored, err := f.driver.RestoreWorktreeBranch(f.root, f.path, "am/new", "am/old", "")
+	got := f.state(t)
+	if err == nil || !strings.Contains(err.Error(), "branch already exists: am/old") || restored != "" ||
+		got.Head != "refs/heads/am/new" || got.New != f.a || got.Old != f.a || got.NewConfig != "original" {
+		t.Fatalf("restored=%q err=%v\nstate=%+v", restored, err, got)
 	}
 }
