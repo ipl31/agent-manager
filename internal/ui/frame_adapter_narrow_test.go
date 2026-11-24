@@ -3,10 +3,13 @@ package ui
 import (
 	"fmt"
 	"github.com/YoanWai/agent-manager/internal/keybind"
+	"github.com/YoanWai/agent-manager/internal/store"
+	uiconnections "github.com/YoanWai/agent-manager/internal/ui/connections"
 	uiframe "github.com/YoanWai/agent-manager/internal/ui/frame"
 	uihelp "github.com/YoanWai/agent-manager/internal/ui/help"
 	uinotices "github.com/YoanWai/agent-manager/internal/ui/notices"
 	"github.com/YoanWai/agent-manager/internal/ui/presentation"
+	uirail "github.com/YoanWai/agent-manager/internal/ui/rail"
 	uisettings "github.com/YoanWai/agent-manager/internal/ui/settings"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -171,5 +174,35 @@ func TestWideListFooterKeepsRoomForThePreview(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestRemoteFooterKeepsPaneHeightWhenReviveAppears(t *testing.T) {
+	m := listedModel(t, &fakeSSH{})
+	m.prefs.glyphMode = presentation.GlyphModeBasic
+	m.layout.width, m.layout.height = 110, 40
+	for _, action := range m.services.listKeys.Actions() {
+		switch action.Name {
+		case keybind.Open, keybind.Attach, keybind.Prompt, keybind.Revive, keybind.Up, keybind.Down,
+			keybind.NewSession, keybind.NewConnection, keybind.Help, keybind.Quit, keybind.Settings:
+		default:
+			m.services.listKeys = m.services.listKeys.With(action.Name, keybind.Keys())
+		}
+	}
+	host := strings.Repeat("h", 40)
+	m.ssh.SetList([]store.Connection{{Name: host, Destination: "me@box"}})
+	state := uiconnections.Host{OK: true, Sessions: []uiconnections.Session{{ID: "s1", Name: "api", Tool: "claude", Status: "idle"}}}
+	setHost(m, host, state)
+	m.rail.Focus(uirail.Selection{Kind: uirail.SessionRow, Host: host, SessionID: "s1"})
+	active := m.listFooter()
+	height := m.previewPaneHeight()
+	state.Sessions[0].Status = "dead"
+	setHost(m, host, state)
+	dead := m.listFooter()
+	if !strings.Contains(active, host) || strings.Contains(active, "revive") || !strings.Contains(dead, "revive") {
+		t.Fatalf("unexpected remote footers: active=%q dead=%q", active, dead)
+	}
+	if lipgloss.Height(active) != lipgloss.Height(dead) || height != m.previewPaneHeight() {
+		t.Fatalf("footer height %d -> %d, pane height %d -> %d", lipgloss.Height(active), lipgloss.Height(dead), height, m.previewPaneHeight())
 	}
 }
