@@ -6,6 +6,7 @@ import (
 	"maps"
 	"slices"
 
+	"github.com/YoanWai/agent-manager/internal/git"
 	"github.com/YoanWai/agent-manager/internal/sessioncmd"
 	"github.com/YoanWai/agent-manager/internal/store"
 )
@@ -128,9 +129,15 @@ func Rename(s Sources, preflight Preflight, request Request) (Outcome, error) {
 	}
 	// The branch changes before the name is stored, so a name git cannot
 	// give it leaves the rename card open instead of splitting them apart.
+	// A rename that left the old branch behind still renamed, so the name
+	// follows and the leftover shows as a warning.
+	var leftover error
 	if sess.WorktreeRepo != "" && sess.WorktreeBranch != "" {
 		if err := sessioncmd.RenameWorktreeBranch(s.Git, s.Store, &sess, request.Name); err != nil {
-			return result, err
+			if !errors.As(err, new(*git.BranchCleanupError)) {
+				return result, err
+			}
+			leftover = err
 		}
 		if sess.WorktreeBranch != request.Sess.WorktreeBranch {
 			result.Branch = sess.WorktreeBranch
@@ -151,7 +158,7 @@ func Rename(s Sources, preflight Preflight, request Request) (Outcome, error) {
 		return result, err
 	}
 	result.Sessions = []store.Session{updated}
-	result.Warning = s.relabel(result.Sessions)
+	result.Warning = errors.Join(leftover, s.relabel(result.Sessions))
 	return result, nil
 }
 

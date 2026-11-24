@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/YoanWai/agent-manager/internal/git"
 	"github.com/YoanWai/agent-manager/internal/sessioncmd"
 
 	"github.com/YoanWai/agent-manager/internal/store"
@@ -25,7 +26,7 @@ func (p *Runner) applyPendingRename(sess *store.Session) error {
 	if err != nil || !found {
 		return err
 	}
-	renameErr := p.renamePending(sess, name)
+	leftover, renameErr := p.renamePending(sess, name)
 	// The claim outlives a verdict this poll could not write: the next one
 	// answers the same rename rather than leaving the agent that asked to
 	// time out on a rename that has in fact been applied or refused. That
@@ -44,24 +45,31 @@ func (p *Runner) applyPendingRename(sess *store.Session) error {
 	// The row going out from under this rename is the agent's answer, not
 	// a failure of the pass that carried it.
 	if errors.Is(renameErr, store.ErrSessionGone) {
-		return nil
+		return leftover
 	}
-	return renameErr
+	return errors.Join(renameErr, leftover)
 }
 
-func (p *Runner) renamePending(sess *store.Session, name string) error {
+// renamePending applies one rename. A branch rename that happened but
+// left the old branch behind is not a refusal: the name is applied, and
+// the leftover comes back first to be reported once.
+func (p *Runner) renamePending(sess *store.Session, name string) (error, error) {
 	if name == "" || name == sess.Name {
-		return nil
+		return nil, nil
 	}
+	var leftover error
 	if err := sessioncmd.RenameWorktreeBranch(p.gitDrv, p.store, sess, name); err != nil {
-		return fmt.Errorf("worktree rename: %w", err)
+		if !errors.As(err, new(*git.BranchCleanupError)) {
+			return nil, fmt.Errorf("worktree rename: %w", err)
+		}
+		leftover = fmt.Errorf("worktree rename: %w", err)
 	}
 	if err := p.store.RenameSession(sess.ID, name); err != nil {
-		return err
+		return leftover, err
 	}
 	sess.Name = name
 	_ = p.tmux.SetLabel(sess.ID, sessioncmd.SessionLabel(sess.Group, name))
-	return nil
+	return leftover, nil
 }
 
 func (p *Runner) applyPendingReviewRepo(sess *store.Session) error {

@@ -104,6 +104,10 @@ compete() {
 }
 cmd="$*"
 case "$cmd" in "-c core.quotepath=false "*) cmd=${cmd#-c core.quotepath=false } ;; esac
+if [ -n "${RENAME_LEGACY-}" ] && [ "$cmd" = "update-ref --no-deref --stdin" ]; then
+	# Git 2.27 to 2.45: transactions, but no symref verbs.
+	cat >/dev/null; echo "start: ok"; echo "fatal: unknown command: symref-verify" >&2; exit 128
+fi
 case "$RENAME_MODE:$cmd" in
 after-copy:"branch -c "*)
 	"$G" "$@"; status=$?
@@ -310,4 +314,33 @@ exec sleep 12
 		got.OldConfig != "original" || got.PathLocks {
 		t.Fatalf("branch=%q err=%v elapsed=%s\nstate=%+v", branch, err, elapsed, got)
 	}
+}
+
+// Git before 2.46 has no conditional symref write. The rename still keeps
+// HEAD on a live branch, carries the config, and leaves a checkout made
+// before it re-reads HEAD alone.
+func TestRenameWorktreeBranchWithoutSymrefTransactions(t *testing.T) {
+	t.Run("rename", func(t *testing.T) {
+		f := newRenameFixture(t)
+		f.wrapGit(t, "none", "true")
+		t.Setenv("RENAME_LEGACY", "1")
+		branch, err := f.driver.RenameWorktreeBranch(f.root, f.path, "am/old", "new")
+		got := f.state(t)
+		if err != nil || branch != "am/new" || got.Head != "refs/heads/am/new" || got.New != f.a || got.Old != "" ||
+			got.NewConfig != "original" || got.OldConfig != "" {
+			t.Fatalf("branch=%q err=%v\nstate=%+v", branch, err, got)
+		}
+	})
+	t.Run("switch before the HEAD write", func(t *testing.T) {
+		f := newRenameFixture(t)
+		trace := f.wrapGit(t, "at-lock", `"$RENAME_REAL_GIT" -C "$RENAME_PATH" checkout -q other`)
+		t.Setenv("RENAME_LEGACY", "1")
+		branch, err := f.driver.RenameWorktreeBranch(f.root, f.path, "am/old", "new")
+		got := f.state(t)
+		witness := readTrace(t, trace)
+		if !strings.HasPrefix(witness, "competed") || err == nil || got.Head != "refs/heads/other" ||
+			got.Old != f.a || got.OldConfig != "original" || got.New != "" || got.NewConfig != "" {
+			t.Fatalf("branch=%q err=%v witness=%q\nstate=%+v", branch, err, witness, got)
+		}
+	})
 }
