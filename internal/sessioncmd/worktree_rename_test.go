@@ -190,3 +190,61 @@ func TestRenameWorktreeBranchSerializesOverlappingRenames(t *testing.T) {
 			firstErr, secondErr, head, st.branch(), stale.WorktreeBranch, r.ref("am/old"), r.ref("am/winner"), r.ref("am/stale"))
 	}
 }
+
+// R2-2: a rename that moved HEAD but whose store write failed, and could
+// not be undone, leaves git ahead of the row. Asked for the same name
+// again, the rename records the branch git already has.
+func TestRenameWorktreeBranchRecordsABranchGitAlreadyHas(t *testing.T) {
+	r := newRenameRepo(t, "old")
+	if branch, err := r.driver.RenameWorktreeBranch(r.root, r.path, "am/old", "new"); err != nil || branch != "am/new" {
+		t.Fatalf("setup rename: %q %v", branch, err)
+	}
+	st := &renameStore{row: r.sess}
+	err := RenameWorktreeBranch(r.driver, st, &r.sess, "new")
+	head := gitRead(r.path, "symbolic-ref", "HEAD")
+	if err != nil || st.branch() != "am/new" || r.sess.WorktreeBranch != "am/new" || head != "refs/heads/am/new" || r.ref("am/new") != r.tip {
+		t.Fatalf("err=%v stored=%q session=%q HEAD=%q", err, st.branch(), r.sess.WorktreeBranch, head)
+	}
+}
+
+// R2-2: the old-ref delete is refused and the store write fails. The
+// rollback goes back onto the original it kept, so a retry with a
+// writable store starts from agreement and ends with git and the row on
+// the same branch.
+func TestRenameWorktreeBranchRetriesARenameWhoseStoreWriteAndCleanupFailed(t *testing.T) {
+	testenv.SkipPOSIXShell(t)
+	r := newRenameRepo(t, "old")
+	hooks := t.TempDir()
+	script := `#!/bin/sh
+[ "$1" = prepared ] || exit 0
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_PREFIX
+[ "$(git -C '` + r.path + `' symbolic-ref -q HEAD)" = refs/heads/am/new ] || exit 0
+# A lock's verify reads like a delete; the delete is the transaction
+# that holds nothing else.
+updates=$(cat)
+[ "$(printf '%s\n' "$updates" | wc -l)" -eq 1 ] || exit 0
+case "$updates" in *" 0000000000000000000000000000000000000000 refs/heads/am/old") exit 1 ;; esac
+exit 0
+`
+	if err := os.WriteFile(filepath.Join(hooks, "reference-transaction"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitMust(t, r.root, "config", "core.hooksPath", hooks)
+	storeErr := errors.New("store write rejected")
+	st := &renameStore{row: r.sess, save: func(string) error { return storeErr }}
+	first := RenameWorktreeBranch(r.driver, st, &r.sess, "new")
+	firstHead := gitRead(r.path, "symbolic-ref", "HEAD")
+	if !errors.Is(first, storeErr) || firstHead != "refs/heads/"+st.branch() {
+		t.Fatalf("first: err=%v stored=%q HEAD=%q old=%q new=%q", first, st.branch(), firstHead, r.ref("am/old"), r.ref("am/new"))
+	}
+	gitMust(t, r.root, "config", "--unset", "core.hooksPath")
+	st.mu.Lock()
+	st.save = nil
+	st.mu.Unlock()
+	retry := RenameWorktreeBranch(r.driver, st, &r.sess, "new")
+	head := gitRead(r.path, "symbolic-ref", "HEAD")
+	if retry != nil || st.branch() != "am/new" || head != "refs/heads/am/new" || r.sess.WorktreeBranch != "am/new" ||
+		r.ref("am/new") != r.tip || r.ref("am/old") != "" {
+		t.Fatalf("retry: err=%v stored=%q session=%q HEAD=%q old=%q new=%q", retry, st.branch(), r.sess.WorktreeBranch, head, r.ref("am/old"), r.ref("am/new"))
+	}
+}

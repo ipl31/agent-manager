@@ -1,6 +1,7 @@
 package git
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -116,6 +117,8 @@ after-copy:"branch -c "*)
 at-lock:"update-ref --stdin")
 	compete "$cmd" ;;
 at-head:"symbolic-ref -m "*|at-head:"update-ref --no-deref -m "*)
+	compete "$cmd" ;;
+at-delete:"update-ref -d refs/heads/am/old "*)
 	compete "$cmd" ;;
 eof:update-ref*--stdin*)
 	# Git 2.26 reads all of stdin before it parses a command, and knows
@@ -240,7 +243,11 @@ done
 }
 
 // I5: the user switches or detaches after the rename checked HEAD and
-// before it writes HEAD. The user's checkout wins.
+// before it writes HEAD. The user's checkout wins where git can write
+// HEAD on condition (symref-update, Git 2.46). Older git re-reads HEAD
+// just before the write, so a checkout landing in that last gap is
+// overwritten; there the test holds the rename to what it still
+// promises: HEAD names a live branch and no commit is lost.
 func TestRenameWorktreeBranchKeepsACheckoutMadeDuringTheRename(t *testing.T) {
 	for _, tc := range []struct{ name, compete, head string }{
 		{"switch at the same commit", `"$RENAME_REAL_GIT" -C "$RENAME_PATH" checkout -q other`, "refs/heads/other"},
@@ -248,10 +255,23 @@ func TestRenameWorktreeBranchKeepsACheckoutMadeDuringTheRename(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newRenameFixture(t)
+			symref, err := f.driver.refTransactions(f.path, "refs/heads/am/old")
+			if err != nil {
+				t.Fatalf("probe: %v", err)
+			}
 			trace := f.wrapGit(t, "at-head", tc.compete)
 			branch, err := f.driver.RenameWorktreeBranch(f.root, f.path, "am/old", "new")
 			got := f.state(t)
 			witness := readTrace(t, trace)
+			if !symref {
+				version, _ := exec.Command("git", "--version").Output()
+				t.Logf("%s has no symref-update; checking the best-effort HEAD write", strings.TrimSpace(string(version)))
+				if !strings.HasPrefix(witness, "competed") || err != nil || branch != "am/new" || got.Head != "refs/heads/am/new" ||
+					got.New != f.a || got.Other != f.a || got.NewConfig != "original" {
+					t.Fatalf("branch=%q err=%v witness=%q\nstate=%+v", branch, err, witness, got)
+				}
+				return
+			}
 			want := tc.head
 			if want == "detached:" {
 				want += f.a
@@ -343,4 +363,71 @@ func TestRenameWorktreeBranchWithoutSymrefTransactions(t *testing.T) {
 			t.Fatalf("branch=%q err=%v witness=%q\nstate=%+v", branch, err, witness, got)
 		}
 	})
+}
+
+// R2-1: git copies the ref, then fails to copy the branch config. The
+// copy is the rename's, and nothing points at it, so it goes.
+func TestRenameWorktreeBranchDropsACopyWhoseConfigFailed(t *testing.T) {
+	f := newRenameFixture(t)
+	lock := filepath.Join(f.root, ".git", "config.lock")
+	if err := os.WriteFile(lock, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	branch, err := f.driver.RenameWorktreeBranch(f.root, f.path, "am/old", "new")
+	if rmErr := os.Remove(lock); rmErr != nil {
+		t.Fatal(rmErr)
+	}
+	got := f.state(t)
+	if err == nil || branch != "" || got.Head != "refs/heads/am/old" || got.Old != f.a || got.OldConfig != "original" ||
+		got.New != "" || got.NewConfig != "" {
+		t.Fatalf("branch=%q err=%v\nstate=%+v", branch, err, got)
+	}
+}
+
+// R2-2: a rename whose old-ref delete was refused left the original
+// branch in place. Restoring goes back onto it instead of refusing it as
+// a taken name, and drops the copy.
+func TestRestoreWorktreeBranchReturnsToTheOriginalItKept(t *testing.T) {
+	f := newRenameFixture(t)
+	f.installRefHook(t, `[ "$1" = prepared ] || exit 0
+[ -e '`+filepath.Join(f.root, ".git", "reject-old-delete")+`' ] || exit 0
+[ "$(git -C '`+f.path+`' symbolic-ref -q HEAD)" = refs/heads/am/new ] || exit 0
+while read -r old new ref; do
+	[ "$ref" = refs/heads/am/old ] && [ "$new" = 0000000000000000000000000000000000000000 ] && exit 1
+done
+exit 0
+`)
+	marker := filepath.Join(f.root, ".git", "reject-old-delete")
+	if err := os.WriteFile(marker, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	branch, err := f.driver.RenameWorktreeBranch(f.root, f.path, "am/old", "new")
+	if branch != "am/new" || !errors.As(err, new(*BranchCleanupError)) {
+		t.Fatalf("setup rename: branch=%q err=%v state=%+v", branch, err, f.state(t))
+	}
+	if err := os.Remove(marker); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := f.driver.RestoreWorktreeBranch(f.root, f.path, "am/new", "am/old")
+	got := f.state(t)
+	if err != nil || restored != "am/old" || got.Head != "refs/heads/am/old" || got.Old != f.a || got.OldConfig != "original" ||
+		got.New != "" || got.NewConfig != "" {
+		t.Fatalf("restored=%q err=%v\nstate=%+v", restored, err, got)
+	}
+}
+
+// R2-3: another checkout takes the old branch between the rename's check
+// and its delete. Git does not stop the delete, so the rename puts the
+// branch back and reports it.
+func TestRenameWorktreeBranchRecreatesAnOldBranchCheckedOutDuringItsDelete(t *testing.T) {
+	f := newRenameFixture(t)
+	trace := f.wrapGit(t, "at-delete", `"$RENAME_REAL_GIT" -C "$RENAME_ROOT" checkout -q --ignore-other-worktrees am/old`)
+	branch, err := f.driver.RenameWorktreeBranch(f.root, f.path, "am/old", "new")
+	got := f.state(t)
+	witness := readTrace(t, trace)
+	if !strings.HasPrefix(witness, "competed") || branch != "am/new" || !errors.As(err, new(*BranchCleanupError)) ||
+		!strings.Contains(err.Error(), "am/old") || got.Head != "refs/heads/am/new" || got.New != f.a ||
+		got.MainHead != "refs/heads/am/old" || !got.MainResolves || got.Old != f.a || got.OldConfig != "original" {
+		t.Fatalf("branch=%q err=%v witness=%q\nstate=%+v", branch, err, witness, got)
+	}
 }
