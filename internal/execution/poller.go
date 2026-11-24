@@ -279,8 +279,9 @@ func StoredPreview(st *store.Store, driver *tmux.Driver, sessID string) (string,
 
 // refreshOnce polls every live session's pane, derives and stores status,
 // and samples system stats. Liveness and pane pids come from one tmux
-// call, and every process tree from one ps pass with a second scoped to
-// the pane children, so the poll cost stays flat as sessions are added.
+// call, the panes' text from one or two more, and every process tree from
+// one ps pass with a second scoped to the pane children, so the poll cost
+// stays flat as sessions are added.
 // runMu serializes the loop with one-off refreshes issued as tea commands.
 func (p *Runner) Step() Result { return p.step(context.Background()) }
 
@@ -352,12 +353,23 @@ func (p *Runner) step(ctx context.Context) Result {
 		}
 	}
 	var livePIDs []int
+	var liveIDs []string
 	for _, sess := range sessions {
 		if !sess.Archived && panes[sess.ID].PID > 0 {
 			livePIDs = append(livePIDs, panes[sess.ID].PID)
+			liveIDs = append(liveIDs, sess.ID)
 		}
 	}
 	trees := sysstat.Trees(livePIDs)
+	// Where one tmux call reads every pane, the pass reads them all ahead of
+	// the rows, until a send or a delivery: that can take seconds, and a
+	// capture taken before it describes the pane as it was then.
+	readAhead := tmux.CapturesAsList
+	var captured, histories map[string]string
+	if readAhead {
+		captured = p.tmux.CapturePanes(liveIDs)
+		histories = p.quoteHistories(ctx, sessions, captured)
+	}
 	ncpu := sysstat.LogicalCPUs()
 	memTotal, _ := sysstat.MemTotalBytes()
 	now := time.Now()
@@ -464,8 +476,13 @@ func (p *Runner) step(ctx context.Context) Result {
 			// taken at the start of the pass still names the previous one,
 			// and the quote read next is that conversation's.
 			sess = sessions[i]
-			if pane, err := p.tmux.CapturePane(sess.ID); err == nil {
-				paneLastLines[sess.ID], panePrompts[sess.ID] = p.rowLines(ctx, sess, pane, panes[sess.ID].Path)
+			pane, readable := captured[sess.ID]
+			if !readAhead {
+				fresh, err := p.tmux.CapturePane(sess.ID)
+				pane, readable = fresh, err == nil
+			}
+			if readable {
+				paneLastLines[sess.ID], panePrompts[sess.ID] = p.rowLines(ctx, sess, pane, panes[sess.ID].Path, histories)
 				derived, err := p.derivePaneStatus(sess, pane, agentAlive, paneHashes)
 				if err != nil {
 					return Result{Err: err}
@@ -521,6 +538,9 @@ func (p *Runner) step(ctx context.Context) Result {
 				}
 				if sess.ID == selectedID {
 					preview = pane
+				}
+				if sent || delivered {
+					readAhead, histories = false, nil
 				}
 			}
 		}

@@ -1,0 +1,105 @@
+package execution
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/YoanWai/agent-manager/internal/config"
+	"github.com/YoanWai/agent-manager/internal/status"
+	"github.com/YoanWai/agent-manager/internal/store"
+	"github.com/YoanWai/agent-manager/internal/testenv"
+)
+
+// A prompt echo that scrolled off the screen is recovered from the pane's
+// history, for every session of the pass that lost one.
+func TestPromptsScrolledOffAreRecoveredFromHistory(t *testing.T) {
+	testenv.SkipPOSIXShell(t)
+	m := buildModel(t)
+	m.cfg.Tools["scrolling-tool"] = config.Tool{
+		Command:        `sh -c 'printf "> prompt in %s\n" "$(basename "$PWD")"; seq 1 60; printf "❯ "; exec cat'`,
+		DefaultStatus:  status.Idle,
+		ActivityCutoff: "(?m)^❯",
+		UserEcho:       "^> ",
+	}
+	engine, err := status.NewEngine(m.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.poller.engine = engine
+	for _, name := range []string{"first", "second"} {
+		dir := filepath.Join(t.TempDir(), name)
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := m.spawnSession("scrolling-tool", name, dir, "", "", false, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, sess := range m.sessionRows() {
+		if pane := settledPane(t, m, sess.ID, "60", "❯"); strings.Contains(pane, "prompt in") {
+			t.Fatalf("the echo of %s is still on screen:\n%s", sess.Name, pane)
+		}
+	}
+	result := m.poller.Step()
+	if result.Err != nil {
+		t.Fatal(result.Err)
+	}
+	for _, sess := range m.sessionRows() {
+		if got, want := result.Snapshot.PanePrompts[sess.ID], "prompt in "+sess.Name; got != want {
+			t.Errorf("prompt of %s = %q, want %q read from history", sess.Name, got, want)
+		}
+	}
+}
+
+// The pass reads every pane at once, before it types into any of them, and
+// a send can take seconds. A session reached after one is read again, so
+// its row quotes what its pane shows now.
+func TestAPaneReachedAfterASendIsReadAgain(t *testing.T) {
+	m := buildModel(t)
+	if err := m.spawnSession("ready-tool", "sender-abcd", t.TempDir(), "", "", true, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.spawnSession("quietchat", "reached-later", t.TempDir(), "", "", false, false); err != nil {
+		t.Fatal(err)
+	}
+	sender, later := m.sessionRows()[0], m.sessionRows()[1]
+	settledPane(t, m, sender.ID, "❯")
+
+	const marker = "typed-after-the-send"
+	typed := false
+	prev := followDuringPoll
+	t.Cleanup(func() { followDuringPoll = prev })
+	followDuringPoll = func(p *Runner, row *store.Session, agentAlive, paneGone bool) error {
+		if row.ID != later.ID || typed {
+			return nil
+		}
+		current, err := m.store.Get(sender.ID)
+		if err != nil {
+			return err
+		}
+		if len(current.PendingInputs) == 0 {
+			typed = true
+			waitForPane(t, m, later.ID, marker)
+		}
+		return nil
+	}
+
+	for deadline := time.Now().Add(10 * time.Second); !typed; time.Sleep(50 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the pending input was never sent")
+		}
+		result := m.poller.Step()
+		if result.Err != nil {
+			t.Fatal(result.Err)
+		}
+		if rows := result.Snapshot.Sessions; rows[0].ID != sender.ID {
+			t.Fatalf("pass order = %s first, want the sender %s", rows[0].ID, sender.ID)
+		}
+		if typed && !strings.Contains(result.Snapshot.PaneLines[later.ID], marker) {
+			t.Fatalf("row quotes %q, want the line typed after the send", result.Snapshot.PaneLines[later.ID])
+		}
+	}
+}
