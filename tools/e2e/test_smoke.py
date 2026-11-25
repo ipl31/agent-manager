@@ -36,6 +36,21 @@ class SandboxTests(unittest.TestCase):
             with patch.object(isolated, 'tmux', return_value=subprocess.CompletedProcess([], 0, '', '')):
                 isolated.close()
 
+    def test_inner_tmux_keeps_its_argv_without_raw_traces(self):
+        root = Path(self.temp.name)
+        stub = root / 'tmux'
+        stub.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n')
+        stub.chmod(0o700)
+        with patch.dict(os.environ, {'PATH': str(root)}):
+            isolated = Sandbox(root / 'argv-evidence')
+        try:
+            args = ['-L', 'agentmgr', '-f', '/dev/null', 'new-session', '-d', '-s', 'fixture']
+            self.assertEqual(isolated.run(['tmux', *args]).stdout.splitlines(), args)
+            self.assertFalse((isolated.artifacts / 'tmux-logs').exists())
+        finally:
+            with patch.object(isolated, 'tmux', return_value=subprocess.CompletedProcess([], 0, '', '')):
+                isolated.close()
+
     def test_sandbox_routes_http_to_a_closed_port(self):
         self.assertEqual(self.sandbox.env['HTTPS_PROXY'], 'http://127.0.0.1:1')
         self.assertEqual(self.sandbox.env['HTTP_PROXY'], 'http://127.0.0.1:1')

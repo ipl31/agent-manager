@@ -202,12 +202,18 @@ func TestFocusWatchEchoesRepeatedInputBeforeTheFrameBudget(t *testing.T) {
 					synctest.Sleep(2 * frameBudget)
 					if stream {
 						loop.output(fmt.Sprintf("stream%d", attempt))
-						synctest.Sleep(captureGap)
 					}
-					loop.input <- struct{}{}
+					loop.watch.InputSent(captureLoopFocusID)
 					synctest.Wait()
 					count := len(loop.frames())
 					loop.output(loop.currentPane())
+					if stream {
+						time.Sleep(captureGap - time.Nanosecond)
+						synctest.Wait()
+						loop.wantFrames(count)
+						time.Sleep(time.Nanosecond)
+						synctest.Wait()
+					}
 					loop.wantFrames(count + 1)
 					unchanged := loop.frames()[count]
 					token := fmt.Sprintf("<%d>", attempt)
@@ -226,6 +232,50 @@ func TestFocusWatchEchoesRepeatedInputBeforeTheFrameBudget(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestFocusWatchIgnoresInputForOtherPanesAndPolledMode(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		id     string
+		polled bool
+	}{
+		{name: "other pane", id: "other"},
+		{name: "polled", id: captureLoopFocusID, polled: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				loop := startCaptureLoop(t)
+				defer loop.close()
+				loop.watch.polled = tc.polled
+				synctest.Sleep(frameBudget)
+				loop.output("stream")
+				loop.wantFrames(2)
+				loop.watch.InputSent(tc.id)
+				synctest.Wait()
+				loop.output("next")
+				synctest.Sleep(frameBudget - time.Nanosecond)
+				loop.wantFrames(2)
+				synctest.Sleep(time.Nanosecond)
+				loop.wantFrames(3)
+			})
+		})
+	}
+}
+
+func TestFocusWatchForwardsInputAndCapturesReplyDuringOutput(t *testing.T) {
+	driver, id, arrivals, watch := startFocusArrivalWatch(t)
+	waitFocusArrival(t, arrivals, "")
+	if err := driver.SendText(id, `stty -echo; (i=1; while [ "$i" -le 20 ]; do printf '%s-stream-%s\n' "$((6*7))" "$i"; i=$((i+1)); sleep 0.1; done) & `+
+		`IFS= read -r key; printf '%s-reply-%s\n' "$((6*7))" "$key"; wait`); err != nil {
+		t.Fatal(err)
+	}
+	waitFocusArrival(t, arrivals, "42-stream-1")
+	if available, err := watch.Forward("send-keys -t " + tmux.PaneTarget(id) + " -- a Enter"); !available || err != nil {
+		t.Fatalf("forwarded key = available %v, err %v", available, err)
+	}
+	watch.InputSent(id)
+	waitFocusArrival(t, arrivals, "42-reply-a")
 }
 
 func TestFocusWatchWaitsForPaneOutputAfterInput(t *testing.T) {
@@ -254,7 +304,7 @@ func TestFocusWatchBoundsInputCapturesAndRestoresTheStreamBudget(t *testing.T) {
 		loop := startCaptureLoop(t)
 		defer loop.close()
 		for tick := range 500 {
-			loop.input <- struct{}{}
+			loop.watch.InputSent(captureLoopFocusID)
 			synctest.Wait()
 			loop.output(fmt.Sprintf("line%d", tick))
 			time.Sleep(time.Millisecond)

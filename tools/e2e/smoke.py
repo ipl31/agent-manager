@@ -56,18 +56,6 @@ class Sandbox:
         closed = 'http://127.0.0.1:1'
         self.env.update(HTTP_PROXY=closed, HTTPS_PROXY=closed, http_proxy=closed, https_proxy=closed)
         self.log = self.artifacts / 'commands.jsonl'
-        tmux_bin = shutil.which('tmux')
-        if tmux_bin:
-            traced = self.home / 'tmux-bin'
-            traced.mkdir()
-            logs = self.artifacts / 'tmux-logs'
-            logs.mkdir()
-            wrapper = traced / 'tmux'
-            wrapper.write_text('#!/bin/sh\n' +
-                               f'case "$1 $2" in "-L agentmgr") cd {shlex.quote(str(logs))} || exit; set -- -v "$@" ;; esac\n' +
-                               f'exec {shlex.quote(tmux_bin)} "$@"\n')
-            wrapper.chmod(0o700)
-            self.env['PATH'] = str(traced) + ':' + self.env.get('PATH', '')
 
     def seed_feed_cache(self):
         """A fresh, empty message feed, so no scenario races a GitHub fetch.

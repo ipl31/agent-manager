@@ -7,10 +7,12 @@ import (
 	"time"
 )
 
+const captureLoopFocusID = "active"
+
 type captureLoopTest struct {
 	t        *testing.T
 	stop     chan struct{}
-	input    chan struct{}
+	watch    *Watcher
 	events   chan struct{}
 	mu       sync.Mutex
 	pane     string
@@ -19,11 +21,12 @@ type captureLoopTest struct {
 }
 
 func startCaptureLoop(t *testing.T) *captureLoopTest {
+	watch := &Watcher{id: captureLoopFocusID, input: make(chan struct{}, 1)}
 	loop := &captureLoopTest{
-		t: t, stop: make(chan struct{}), input: make(chan struct{}, 1),
+		t: t, stop: make(chan struct{}), watch: watch,
 		events: make(chan struct{}, 1), pane: "seed", arrivals: make(chan focusArrival, 1024),
 	}
-	go captureLoop(loop.stop, loop.input, loop.events, nil, func() (string, bool) {
+	go captureLoop(loop.stop, watch.input, loop.events, nil, func() (string, bool) {
 		pane := loop.currentPane()
 		loop.arrivals <- focusArrival{time.Now(), pane}
 		return pane, true

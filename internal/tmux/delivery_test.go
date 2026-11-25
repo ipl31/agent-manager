@@ -51,33 +51,59 @@ exit 0
 }
 
 func TestSendTextContextKillsAndReapsTransportBeforeReturning(t *testing.T) {
+	t.Run("child-ready", func(t *testing.T) { testCanceledPasteTransport(t, false) })
+	t.Run("fork-window", func(t *testing.T) { testCanceledPasteTransport(t, true) })
+}
+
+func testCanceledPasteTransport(t *testing.T, cancelBeforeForkAck bool) {
 	dir := t.TempDir()
 	started := filepath.Join(dir, "started")
+	handedOff := filepath.Join(dir, "handed-off")
 	parentPID := filepath.Join(dir, "parent-pid")
-	childPID := filepath.Join(dir, "child-pid")
 	gatePath := filepath.Join(dir, "gate")
-	if err := syscall.Mkfifo(gatePath, 0o600); err != nil {
-		t.Fatal(err)
+	livenessPath := filepath.Join(dir, "liveness")
+	for _, path := range []string{gatePath, livenessPath} {
+		if err := syscall.Mkfifo(path, 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	gate, err := os.OpenFile(gatePath, os.O_RDWR, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer gate.Close()
+	// The driver owns command creation, so open the fixture writer in the
+	// transport itself. Only its descendants can inherit that writer.
+	liveness, err := syscall.Open(livenessPath, syscall.O_RDONLY|syscall.O_NONBLOCK|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syscall.Close(liveness)
+	child := "read -r release <&3"
+	beforeFork := ": > " + ShellQuote(started)
+	afterFork := ""
+	if !cancelBeforeForkAck {
+		child = beforeFork + "\n" + child
+		beforeFork = ""
+		// Prove the child holds the writer after exec by dropping the parent's copy.
+		afterFork = "exec 4>&-\n: > " + ShellQuote(handedOff)
+	}
+
 	stub := filepath.Join(dir, "tmux")
 	script := fmt.Sprintf(`#!/bin/sh
 case " $* " in
   *" paste-buffer "*)
     echo $$ > %s
-    sh -c %s &
+    exec 3< %s 4> %s
+    %s
+    sh -c %s </dev/null >/dev/null 2>&1 &
+    %s
     wait
     ;;
 esac
 exit 0
-`, ShellQuote(parentPID), ShellQuote(fmt.Sprintf(`echo $$ > %s
-exec 3< %s
-: > %s
-read -r release <&3`, ShellQuote(childPID), ShellQuote(gatePath), ShellQuote(started))))
+`, ShellQuote(parentPID), ShellQuote(gatePath), ShellQuote(livenessPath),
+		beforeFork, ShellQuote(child), afterFork)
 	if err := os.WriteFile(stub, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -97,12 +123,23 @@ read -r release <&3`, ShellQuote(childPID), ShellQuote(gatePath), ShellQuote(sta
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		if _, err := os.Stat(started); err == nil {
-			break
+			if cancelBeforeForkAck {
+				break
+			}
+			if _, err := os.Stat(handedOff); err == nil {
+				break
+			}
 		}
 		if time.Now().After(deadline) {
 			t.Fatal("transport never reached paste-buffer")
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(time.Millisecond)
+	}
+	var buf [1]byte
+	if !cancelBeforeForkAck {
+		if _, err := syscall.Read(liveness, buf[:]); !errors.Is(err, syscall.EAGAIN) {
+			t.Fatalf("transport did not hold the liveness writer before cancel: %v", err)
+		}
 	}
 	cancel()
 	var got response
@@ -118,36 +155,21 @@ read -r release <&3`, ShellQuote(childPID), ShellQuote(gatePath), ShellQuote(sta
 		t.Fatalf("canceled paste result = %+v", got.result)
 	}
 
+	if n, err := syscall.Read(liveness, buf[:]); n != 0 || err != nil {
+		t.Fatalf("transport can resume after guard-safe return: liveness read = %d, %v", n, err)
+	}
 	rawPID, err := os.ReadFile(parentPID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	pid, err := strconv.Atoi(strings.TrimSpace(string(rawPID)))
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || pid <= 0 {
+		t.Fatalf("invalid transport PID %q", rawPID)
 	}
-	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
-		t.Fatalf("transport process %d still exists after return: %v", pid, err)
-	}
-	rawChildPID, err := os.ReadFile(childPID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	child, err := strconv.Atoi(strings.TrimSpace(string(rawChildPID)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	state, err := exec.Command("ps", "-p", strconv.Itoa(child), "-o", "stat=").Output()
+	state, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "stat=").Output()
 	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 && len(state) == 0 {
-		return
-	}
-	if err != nil {
-		t.Fatalf("inspect transport child: %v", err)
-	}
-	if !strings.HasPrefix(strings.TrimSpace(string(state)), "Z") {
-		_ = syscall.Kill(child, syscall.SIGKILL)
-		t.Fatalf("transport child can resume after guard-safe return, state %q", state)
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 || len(state) != 0 {
+		t.Fatalf("expected transport leader %d to be absent, ps returned %q, %v", pid, state, err)
 	}
 }
 
