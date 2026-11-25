@@ -38,10 +38,17 @@ func TestEffectLifetimeWaitsForRunningWork(t *testing.T) {
 func TestEffectLifetimeWaitIsBounded(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		lifetime := &Lifetime{}
-		lifetime.Begin()
+		if !lifetime.Begin() {
+			t.Fatal("fresh lifetime refused work")
+		}
 		defer lifetime.Done()
-		if lifetime.CloseAndWait(10 * time.Millisecond) {
+		const limit = 10 * time.Millisecond
+		started := time.Now()
+		if lifetime.CloseAndWait(limit) {
 			t.Fatal("reported running work as finished")
+		}
+		if elapsed := time.Since(started); elapsed != limit {
+			t.Fatalf("shutdown waited %v, want %v", elapsed, limit)
 		}
 	})
 }

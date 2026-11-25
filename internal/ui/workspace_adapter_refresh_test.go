@@ -276,9 +276,33 @@ func TestFreshPollAfterReorderApplies(t *testing.T) {
 		createSession(t, m, name, t.TempDir(), "")
 	}
 	m.selectSessionRow(t, "alpha")
+	before, ok := m.refreshCmd()().(refreshMsg)
+	if !ok || before.listedAt.IsZero() {
+		t.Fatalf("pre-reorder poll did not return a stamped listing: %v", before.listedAt)
+	}
 	updated, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyShiftDown})
 	m = updated.(*Model)
 	m.drainEffects(t)
+	fence := m.effects.latestObservation
+	if fence.IsZero() || before.listedAt.After(fence) {
+		t.Fatalf("pre-reorder stamp %v was not fenced by completion %v", before.listedAt, fence)
+	}
+
+	m.applyTestMsg(t, before)
+	m.drainEffects(t)
+	var raw refreshMsg
+	if err := m.applyRequestedRefresh(t, before, func() tea.Msg {
+		msg := m.refreshCmd()()
+		raw, _ = msg.(refreshMsg)
+		return msg
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !raw.listedAt.After(fence) || m.workspace.lastListedAt != raw.listedAt {
+		t.Fatalf("post-reorder listing did not install its original stamp: raw=%v fence=%v last accepted=%v",
+			raw.listedAt, fence, m.workspace.lastListedAt)
+	}
+
 	stored, err := m.services.store.ListSessions(true)
 	if err != nil {
 		t.Fatal(err)

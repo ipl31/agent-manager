@@ -264,14 +264,28 @@ func (m *Model) handleFormKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m *Model) applyCmd(t *testing.T, cmd tea.Cmd) {
 	t.Helper()
+	if err := m.applyCmdResult(t, cmd); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (m *Model) applyCmdResult(t *testing.T, cmd tea.Cmd) error {
+	t.Helper()
 	if cmd == nil {
 		m.drainEffects(t)
 		cmd = m.refreshCmd()
 	}
 	msg := cmd()
+	listing, isListing := msg.(refreshMsg)
+	if isListing && listing.listedAt.IsZero() {
+		return fmt.Errorf("first poll did not return a stamped listing")
+	}
 	m.applyTestMsg(t, msg)
 	m.drainEffects(t)
-	m.applyRequestedRefresh(t, msg)
+	if isListing {
+		return m.applyRequestedRefresh(t, listing, func() tea.Msg { return m.refreshCmd()() })
+	}
+	return nil
 }
 
 // freshListingAt orders a hand-built listing after every observation it confirms.
@@ -295,21 +309,29 @@ func (m *Model) freshListingAt() time.Time {
 	return at.Add(time.Nanosecond)
 }
 
-// applyRequestedRefresh runs a new listing after all effects have drained.
-func (m *Model) applyRequestedRefresh(t *testing.T, msg tea.Msg) {
+// applyRequestedRefresh checks the fence after each drain because a poll
+// can trigger an after-turn mutation of its own.
+func (m *Model) applyRequestedRefresh(t *testing.T, listing refreshMsg, poll tea.Cmd) error {
 	t.Helper()
-	listing, ok := msg.(refreshMsg)
-	if !ok || !m.listingFenced(listing.listedAt) {
-		return
+	const limit = 100
+	for count := 0; m.listingFenced(listing.listedAt) || (!listing.listedAt.IsZero() && listing.listedAt.Before(m.workspace.lastListedAt)); count++ {
+		if count == limit {
+			return fmt.Errorf("listing still fenced or stale after %d replacement polls: raw=%v last accepted=%v fence=%v",
+				count, listing.listedAt, m.workspace.lastListedAt, m.effects.latestObservation)
+		}
+		msg := poll()
+		if failed, ok := msg.(errMsg); ok {
+			return fmt.Errorf("replacement poll %d: %w", count+1, failed.err)
+		}
+		var ok bool
+		listing, ok = msg.(refreshMsg)
+		if !ok || listing.listedAt.IsZero() {
+			return fmt.Errorf("replacement poll %d did not return a stamped listing: %T", count+1, msg)
+		}
+		m.applyTestMsg(t, listing)
+		m.drainEffects(t)
 	}
-	msg = m.refreshCmd()()
-	if failed, ok := msg.(errMsg); ok {
-		t.Fatalf("refresh after a fenced listing: %v", failed.err)
-	}
-	listing = msg.(refreshMsg)
-	listing.listedAt = m.freshListingAt()
-	m.applyTestMsg(t, listing)
-	m.drainEffects(t)
+	return nil
 }
 
 // drainEffects drives only finite UI effects; recurring preview/poll timers stay idle.

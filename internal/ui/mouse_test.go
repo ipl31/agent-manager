@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	uilifecycle "github.com/YoanWai/agent-manager/internal/ui/session/lifecycle"
@@ -470,17 +471,18 @@ func TestDoubleClickFocusesTheRowUnderThePointer(t *testing.T) {
 	line := paintedRailLines(t, m, "alpha")[0]
 	y0, _ := m.bodyYRange()
 	ctx := m.railMouseContext()
-	ctx.Now = time.Unix(1, 0)
+	at := time.Unix(1, 0)
+	ctx.Now = at
 	press := tea.MouseMsg{X: 2, Y: y0 + line, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}
 	updated, _ := m.listPress(press, ctx)
-	m.drainEffects(t)
 	m = updated.(*Model)
 	m.drainEffects(t)
 	m.selectSessionRow(t, "beta")
 
-	ctx.Now = ctx.Now.Add(100 * time.Millisecond)
+	at = at.Add(100 * time.Millisecond)
+	ctx = m.railMouseContext()
+	ctx.Now = at
 	updated, _ = m.listPress(press, ctx)
-	m.drainEffects(t)
 	m = updated.(*Model)
 	m.drainEffects(t)
 	if !m.focused() {
@@ -507,10 +509,11 @@ func TestDoubleClickPairsAcrossARebuild(t *testing.T) {
 	createSession(t, m, "filler", dir, "aaa")
 	createSession(t, m, "target", dir, "zzz")
 
+	line := paintedRailLines(t, m, "target")[0]
 	y0, _ := m.bodyYRange()
 	ctx := m.railMouseContext()
-	ctx.Now = time.Unix(1, 0)
-	line := paintedRailLines(t, m, "target")[0]
+	at := time.Unix(1, 0)
+	ctx.Now = at
 	updated, _ := m.listPress(tea.MouseMsg{
 		X: 2, Y: y0 + line, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
 	}, ctx)
@@ -527,8 +530,11 @@ func TestDoubleClickPairsAcrossARebuild(t *testing.T) {
 		t.Fatal("test setup: folding should have renumbered target's row")
 	}
 	setRailCursor(m, before)
+	y0, _ = m.bodyYRange()
 
-	ctx.Now = ctx.Now.Add(100 * time.Millisecond)
+	at = at.Add(100 * time.Millisecond)
+	ctx = m.railMouseContext()
+	ctx.Now = at
 	updated, _ = m.listPress(tea.MouseMsg{
 		X: 2, Y: y0 + line, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
 	}, ctx)
@@ -619,27 +625,41 @@ func TestDoubleClickFocusesTheRowJustSelected(t *testing.T) {
 	m.prefs.fullLayout = true
 	createSession(t, m, "alpha", t.TempDir(), "")
 	createSession(t, m, "beta", t.TempDir(), "")
+	m.selectSessionRow(t, "alpha")
+	target, _ := m.selected()
 	m.selectSessionRow(t, "beta")
 
 	line := paintedRailLines(t, m, "alpha")[0]
 	y0, _ := m.bodyYRange()
-	ctx := m.railMouseContext()
-	ctx.Now = time.Unix(1, 0)
 	press := tea.MouseMsg{X: 2, Y: y0 + line, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}
-	updated, _ := m.listPress(press, ctx)
+	before := m.gens.foreground
+	synctest.Test(t, func(t *testing.T) {
+		updated, _ := m.handleMouse(press)
+		m = updated.(*Model)
+		if !m.onList() {
+			t.Fatalf("first click should select, screen = %v", m.screenID())
+		}
+		if selected, ok := m.selected(); !ok || selected.ID != target.ID {
+			t.Fatalf("first press selected %q, want %q", selected.ID, target.ID)
+		}
+		if got := m.gens.foreground; got != before+1 {
+			t.Fatalf("foreground after first press = %d, want %d", got, before+1)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+		line := paintedRailLines(t, m, "alpha")[0]
+		y0, _ := m.bodyYRange()
+		press.Y = y0 + line
+		updated, _ = m.handleMouse(press)
+		m = updated.(*Model)
+		if got := m.gens.foreground; got != before+2 {
+			t.Fatalf("foreground after second press = %d, want %d", got, before+2)
+		}
+	})
 	m.drainEffects(t)
-	m = updated.(*Model)
-	m.drainEffects(t)
-	if !m.onList() {
-		t.Fatalf("first click should select, screen = %v", m.screenID())
-	}
-	ctx.Now = ctx.Now.Add(100 * time.Millisecond)
-	updated, _ = m.listPress(press, ctx)
-	m.drainEffects(t)
-	m = updated.(*Model)
-	m.drainEffects(t)
-	if !m.focused() {
-		t.Fatalf("double click should focus alpha, screen = %v, err = %q", m.screenID(), m.errBar.text)
+	if selected, ok := m.selected(); !m.focused() || !ok || selected.ID != target.ID {
+		t.Fatalf("double click should focus %q, selected = %q screen = %v err = %q",
+			target.ID, selected.ID, m.screenID(), m.errBar.text)
 	}
 }
 
@@ -654,15 +674,16 @@ func TestDoubleClickFocusesWhenEnterAttaches(t *testing.T) {
 	line := paintedRailLines(t, m, "alpha")[0]
 	y0, _ := m.bodyYRange()
 	ctx := m.railMouseContext()
-	ctx.Now = time.Unix(1, 0)
+	at := time.Unix(1, 0)
+	ctx.Now = at
 	press := tea.MouseMsg{X: 2, Y: y0 + line, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}
 	updated, _ := m.listPress(press, ctx)
-	m.drainEffects(t)
 	m = updated.(*Model)
 	m.drainEffects(t)
-	ctx.Now = ctx.Now.Add(100 * time.Millisecond)
+	at = at.Add(100 * time.Millisecond)
+	ctx = m.railMouseContext()
+	ctx.Now = at
 	updated, _ = m.listPress(press, ctx)
-	m.drainEffects(t)
 	m = updated.(*Model)
 	m.drainEffects(t)
 	if !m.focused() {
@@ -681,12 +702,14 @@ func TestSlowSecondClickDoesNotFocus(t *testing.T) {
 	y0, _ := m.bodyYRange()
 	press := tea.MouseMsg{X: 2, Y: y0 + line, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}
 	ctx := m.railMouseContext()
-	ctx.Now = time.Unix(1, 0)
-	m.applyRailDecision(m.rail.Mouse(press, m.layout.displayedRail, ctx))
-	m.drainEffects(t)
-	ctx.Now = ctx.Now.Add(time.Second)
+	at := time.Unix(1, 0)
+	ctx.Now = at
 	updated, _ := m.listPress(press, ctx)
+	m = updated.(*Model)
 	m.drainEffects(t)
+	ctx = m.railMouseContext()
+	ctx.Now = at.Add(time.Second)
+	updated, _ = m.listPress(press, ctx)
 	m = updated.(*Model)
 	m.drainEffects(t)
 	if !m.onList() {
@@ -711,15 +734,16 @@ func TestClickOnSelectedGroupTogglesCollapse(t *testing.T) {
 	line := paintedGroupLines(t, m, "work")[0]
 	y0, _ := m.bodyYRange()
 	ctx := m.railMouseContext()
-	ctx.Now = time.Unix(1, 0)
+	at := time.Unix(1, 0)
+	ctx.Now = at
 	press := tea.MouseMsg{X: 2, Y: y0 + line, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}
 	updated, _ := m.listPress(press, ctx)
-	m.drainEffects(t)
 	m = updated.(*Model)
 	m.drainEffects(t)
-	ctx.Now = ctx.Now.Add(100 * time.Millisecond)
+	at = at.Add(100 * time.Millisecond)
+	ctx = m.railMouseContext()
+	ctx.Now = at
 	updated, _ = m.listPress(press, ctx)
-	m.drainEffects(t)
 	m = updated.(*Model)
 	m.drainEffects(t)
 	if !m.rail.IsCollapsed("work") {
@@ -729,14 +753,16 @@ func TestClickOnSelectedGroupTogglesCollapse(t *testing.T) {
 	line = paintedGroupLines(t, m, "work")[0]
 	y0, _ = m.bodyYRange()
 	press.Y = y0 + line
-	ctx.Now = ctx.Now.Add(100 * time.Millisecond)
+	at = at.Add(100 * time.Millisecond)
+	ctx = m.railMouseContext()
+	ctx.Now = at
 	updated, _ = m.listPress(press, ctx)
-	m.drainEffects(t)
 	m = updated.(*Model)
 	m.drainEffects(t)
-	ctx.Now = ctx.Now.Add(100 * time.Millisecond)
+	at = at.Add(100 * time.Millisecond)
+	ctx = m.railMouseContext()
+	ctx.Now = at
 	updated, _ = m.listPress(press, ctx)
-	m.drainEffects(t)
 	m = updated.(*Model)
 	m.drainEffects(t)
 	if m.rail.IsCollapsed("work") {
