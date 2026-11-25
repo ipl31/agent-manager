@@ -366,7 +366,12 @@ func (p *Runner) step(ctx context.Context) Result {
 	// capture taken before it describes the pane as it was then.
 	readAhead := tmux.CapturesAsList
 	var captured, histories map[string]string
+	var awaiting map[string]int
 	if readAhead {
+		var err error
+		if awaiting, err = p.store.QueuedCounts(); err != nil {
+			return Result{Err: err}
+		}
 		captured = p.tmux.CapturePanes(liveIDs)
 		histories = p.quoteHistories(ctx, sessions, captured)
 	}
@@ -476,10 +481,13 @@ func (p *Runner) step(ctx context.Context) Result {
 			// taken at the start of the pass still names the previous one,
 			// and the quote read next is that conversation's.
 			sess = sessions[i]
+			// A delivery ends in Enter, so a row with something to deliver
+			// is read as it is now, not as it was when the pass began.
+			fresh := !readAhead || len(sess.PendingInputs) > 0 || awaiting[sess.ID] > 0
 			pane, readable := captured[sess.ID]
-			if !readAhead {
-				fresh, err := p.tmux.CapturePane(sess.ID)
-				pane, readable = fresh, err == nil
+			if fresh {
+				current, err := p.tmux.CapturePane(sess.ID)
+				pane, readable = current, err == nil
 			}
 			if readable {
 				paneLastLines[sess.ID], panePrompts[sess.ID] = p.rowLines(ctx, sess, pane, panes[sess.ID].Path, histories)
@@ -519,7 +527,7 @@ func (p *Runner) step(ctx context.Context) Result {
 				// describing the moment before it was typed, so the message
 				// waits for the next capture rather than landing on a pane
 				// that is already starting a turn.
-				if !sent && len(sessions[i].PendingInputs) == 0 {
+				if fresh && !sent && len(sessions[i].PendingInputs) == 0 {
 					delivered, err = p.maybeDeliverInbox(sess, pane, derived, agentAlive)
 					if err != nil {
 						return Result{Err: err}

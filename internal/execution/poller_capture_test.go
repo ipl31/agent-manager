@@ -103,3 +103,34 @@ func TestAPaneReachedAfterASendIsReadAgain(t *testing.T) {
 		}
 	}
 }
+
+// A delivery ends in Enter, so it decides on the pane as it is when the row
+// is reached: a line someone began after the pass started holds the message.
+func TestAMessageWaitsOnALineTypedAfterThePassBegan(t *testing.T) {
+	m := buildModel(t)
+	sess := spawnedSession(t, m, "ready-tool")
+	settledPane(t, m, sess.ID, "❯")
+	for deadline := time.Now().Add(30 * time.Second); m.poller.Step().Snapshot.Sessions[0].Status != status.Finished; time.Sleep(50 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the session never came to rest")
+		}
+	}
+	queueMessage(t, m, sess.ID, "rebase on main")
+
+	prev := followDuringPoll
+	t.Cleanup(func() { followDuringPoll = prev })
+	followDuringPoll = func(p *Runner, row *store.Session, agentAlive, paneGone bool) error {
+		if err := m.tmux.Paste(row.ID, "USERTEXT-in-progress"); err != nil {
+			return err
+		}
+		settledPane(t, m, row.ID, "USERTEXT-in-progress")
+		return nil
+	}
+
+	if result := m.poller.Step(); result.Err != nil {
+		t.Fatal(result.Err)
+	}
+	if queued, _ := m.store.QueuedCount(sess.ID); queued != 1 {
+		t.Fatal("a message was typed on top of a line begun during the pass")
+	}
+}
